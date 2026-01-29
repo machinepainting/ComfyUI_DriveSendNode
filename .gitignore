@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pdb
+*.pyc
+*.log
+
+# Virtual environments (optional, depending on setup)
+venv/
+.venv/
+env/
+.env/
+
+# Environment files (only keep in dev)
+.env
+.env.*
+
+# MacOS system files
+.DS_Store
+
+# VSCode settings (optional, for clean repos)
+.vscode/
+
+# Node cache (if used in frontend components)
+node_modules/
+
+# Jupyter checkpoints (if ever using notebooks for debug)
+.ipynb_checkpoints/
+
+# ComfyUI cache/output if relevant
+output/
+temp/
+logs/
