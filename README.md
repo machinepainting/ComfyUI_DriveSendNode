@@ -1,4 +1,6 @@
-# ComfyUI DriveSend Node
+# ComfyUI DriveSend Node (GoogleDrive Version)
+
+**Untested/Dev/ Google Drive Version based on the working DropBox - DropSend Node - (https://github.com/machinepainting/ComfyUI_DropSendNode).**
 
 A ComfyUI custom node for seamless Google Drive uploads with **optional** encryption capabilities. Automatically upload your ComfyUI output files (images and videos) to Google Drive cloud storage — with or without encryption.
 
@@ -8,15 +10,15 @@ A ComfyUI custom node for seamless Google Drive uploads with **optional** encryp
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                            CLOUD (RunPod, etc.)                             │
 │                                                                             │
-│   ComfyUI generates files ──→ DriveSend Node ──→ Uploads to Google Drive   │
-│        (png, mp4, etc.)         │                                          │
-│                                 │                                          │
-│                                 ▼                                          │
-│                      ┌──────────────────────┐                              │
-│                      │ Encryption OPTIONAL  │                              │
-│                      │ ☐ OFF: file.png      │                              │
-│                      │ ☑ ON:  file.png.enc  │                              │
-│                      └──────────────────────┘                              │
+│    ComfyUI generates files ──→ DriveSend Node ──→ Uploads to Google Drive   │
+│        (png, mp4, etc.)         │                                           │
+│                                 │                                           │
+│                                 ▼                                           │
+│                      ┌──────────────────────┐                               │
+│                      │ Encryption OPTIONAL  │                               │
+│                      │ ☐ OFF: file.png      │                               │
+│                      │ ☑ ON:  file.png.enc  │                               │
+│                      └──────────────────────┘                               │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -26,10 +28,10 @@ A ComfyUI custom node for seamless Google Drive uploads with **optional** encryp
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           YOUR LOCAL MACHINE                                │
 │                                                                             │
-│   Google Drive syncs/downloads ──→ If encrypted: Run decrypt script (local)│
-│                                                 ──→ file.png (viewable!)   │
+│   Google Drive syncs/downloads ──→ If encrypted: Run decrypt script (local) │
+│                                                 ──→ file.png (viewable!)    │
 │                                                                             │
-│                                   If not encrypted: Ready to use!          │
+│                                   If not encrypted: Ready to use!           │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -360,11 +362,9 @@ python decrypt_folder.py
 
 ## 🧪 Tested On
 
-**Fully Tested:**
-- macOS 13+ (Ventura, Sonoma)
-- Python 3.10 / 3.11
-- ComfyUI (Jan 2026)
-- Google Drive API v3
+**NOT Tested:**
+I have not tested, this is a work in progress based on my working Dropbox DropSend Node version.
+
 
 **Community Testing Needed:**
 - Windows 10/11 — *Please test and report any issues or suggestions!*
