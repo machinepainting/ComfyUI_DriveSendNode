@@ -1,8 +1,8 @@
-# ComfyUI DriveSend Node (GoogleDrive Version)
-
-**Untested/Dev/ Google Drive Version based on the working DropBox - DropSend Node - (https://github.com/machinepainting/ComfyUI_DropSendNode).**
+# ComfyUI DriveSend Node
 
 A ComfyUI custom node for seamless Google Drive uploads with **optional** encryption capabilities. Automatically upload your ComfyUI output files (images and videos) to Google Drive cloud storage — with or without encryption.
+
+> ⚠️ **Note:** This is a development/untested version based on the working [DropSend Node](https://github.com/machinepainting/ComfyUI_DropSendNode). Community testing welcome!
 
 ## 🔄 How It Works
 
@@ -248,6 +248,8 @@ The `/scripts/` folder contains standalone scripts to decrypt files on your **lo
 
 > ⚠️ **These scripts are for LOCAL USE ONLY.** Run them on your personal computer after downloading or syncing encrypted files from Google Drive. Do not run on cloud instances.
 
+> 💡 **Universal Compatibility:** These scripts work with both DriveSend (Google Drive) and DropSend (Dropbox) nodes. They use the same encryption key (`comfyui_encryption_key`), so you only need to set up key storage once.
+
 ### What Are These Scripts For?
 
 **Decryption Scripts** — The primary scripts. Use these on your local machine to decrypt `.enc` files you've downloaded/synced from Google Drive. When encryption is enabled in the DriveSend node, your files are uploaded as encrypted `.enc` files. These scripts restore them to their original format so you can view and use them.
@@ -280,18 +282,35 @@ pip install cryptography
 1. Open **Keychain Access** (search in Spotlight)
 2. Click **File > New Password Item**
 3. Fill in the fields:
-   - **Keychain Item Name:** `DriveSend_Encryption_Key`
-   - **Account Name:** `DriveSend`
+   - **Keychain Item Name:** `ComfyUI_Encryption_Key`
+   - **Account Name:** `ComfyUI`
    - **Password:** Paste your encryption key
 4. Click **Add**
 
+To retrieve later: Search for `ComfyUI_Encryption_Key` in Keychain Access, double-click, check **Show Password**, and authenticate.
+
 ### Running the Scripts
 
-```bash
-cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
-chmod +x decrypt_folder_mac.sh
-./decrypt_folder_mac.sh
-```
+1. Navigate to the scripts folder:
+   ```bash
+   cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
+   ```
+
+2. Make the script executable (first time only):
+   ```bash
+   chmod +x decrypt_folder_mac.sh
+   chmod +x encrypt_folder_mac.sh
+   ```
+
+3. Run the decryption script:
+   ```bash
+   ./decrypt_folder_mac.sh
+   ```
+
+4. When prompted:
+   - Drag and drop the folder containing `.enc` files into the terminal, or type the path
+   - Choose whether to process subfolders recursively (Y/N)
+   - Optionally move `.enc` files to a separate folder after decryption
 
 ---
 
@@ -299,20 +318,35 @@ chmod +x decrypt_folder_mac.sh
 
 ### Storing Your Encryption Key
 
+**Using Environment Variable (Recommended):**
+
 1. Press `Win + R`, type `sysdm.cpl`, press Enter
 2. Go to **Advanced** tab → **Environment Variables**
 3. Under **User variables**, click **New**
 4. Set:
-   - **Variable name:** `DRIVESEND_ENCRYPTION_KEY`
+   - **Variable name:** `COMFYUI_ENCRYPTION_KEY`
    - **Variable value:** Your encryption key
-5. Click **OK** and restart any open terminals
+5. Click **OK** to save
+6. Restart any open terminals/command prompts
 
 ### Running the Scripts
 
-```cmd
-cd ComfyUI\custom_nodes\ComfyUI_DriveSendNode\scripts
-python decrypt_folder_win.py
-```
+1. Open **Command Prompt** or **PowerShell**
+
+2. Navigate to the scripts folder:
+   ```cmd
+   cd ComfyUI\custom_nodes\ComfyUI_DriveSendNode\scripts
+   ```
+
+3. Run the decryption script:
+   ```cmd
+   python decrypt_folder_win.py
+   ```
+
+4. When prompted:
+   - Enter the full path to the folder containing `.enc` files
+   - Choose whether to process subfolders recursively (Y/N)
+   - Optionally move `.enc` files to a separate folder after decryption
 
 ---
 
@@ -320,21 +354,67 @@ python decrypt_folder_win.py
 
 ### Storing Your Encryption Key
 
+**Option A: Environment Variable (Recommended)**
+
 Add to your `~/.bashrc` or `~/.zshrc`:
 
 ```bash
-export DRIVESEND_ENCRYPTION_KEY="your_encryption_key_here"
+export COMFYUI_ENCRYPTION_KEY="your_encryption_key_here"
 ```
 
-Then reload: `source ~/.bashrc`
+Then reload:
+
+```bash
+source ~/.bashrc
+```
+
+**Option B: Secret Service (GNOME Keyring / KWallet)**
+
+If you have `secret-tool` installed (comes with `libsecret-tools`):
+
+```bash
+# Store the key
+echo -n "your_encryption_key_here" | secret-tool store --label="ComfyUI Encryption Key" service ComfyUI username ComfyUI
+
+# Retrieve the key (for verification)
+secret-tool lookup service ComfyUI username ComfyUI
+```
+
+Install secret-tool if needed:
+
+```bash
+# Debian/Ubuntu
+sudo apt install libsecret-tools
+
+# Fedora
+sudo dnf install libsecret
+
+# Arch
+sudo pacman -S libsecret
+```
 
 ### Running the Scripts
 
-```bash
-cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
-chmod +x decrypt_folder_linux.sh
-./decrypt_folder_linux.sh
-```
+1. Navigate to the scripts folder:
+   ```bash
+   cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
+   ```
+
+2. Make the script executable (first time only):
+   ```bash
+   chmod +x decrypt_folder_linux.sh
+   chmod +x encrypt_folder_linux.sh
+   ```
+
+3. Run the decryption script:
+   ```bash
+   ./decrypt_folder_linux.sh
+   ```
+
+4. When prompted:
+   - Enter the full path to the folder containing `.enc` files
+   - Choose whether to process subfolders recursively (Y/N)
+   - Optionally move `.enc` files to a separate folder after decryption
 
 ---
 
@@ -346,6 +426,13 @@ For maximum compatibility, use the Python script directly on any platform:
 cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
 python decrypt_folder.py
 ```
+
+This script will:
+
+1. Automatically detect your operating system
+2. Check for your encryption key (environment variable, Keychain, or Secret Service)
+3. Prompt for the key if not found
+4. Process all `.enc` files and restore them to their original format
 
 ---
 
@@ -360,17 +447,41 @@ python decrypt_folder.py
 
 ---
 
+## ⚠️ Important Notes
+
+### Using Both DriveSend and DropSend
+
+If you use both nodes (DriveSend for Google Drive and [DropSend](https://github.com/machinepainting/ComfyUI_DropSendNode) for Dropbox), you only need to store your encryption key **once** using any of the methods above. The scripts check for multiple key names for backward compatibility:
+
+- `COMFYUI_ENCRYPTION_KEY` (recommended)
+- `comfyui_encryption_key`
+- `DRIVESEND_ENCRYPTION_KEY` (legacy)
+- `DROPSEND_ENCRYPTION_KEY` (legacy)
+
+The same applies to Keychain/Secret Service - the scripts will find your key regardless of which name you used.
+
+### Running Both Nodes Simultaneously
+
+If you have both DriveSend and DropSend installed and want to use them at the same time, configure them to watch **different folders** to avoid conflicts. For example:
+
+- DriveSend watches: `ComfyUI/output/gdrive/`
+- DropSend watches: `ComfyUI/output/dropbox/`
+
+Or simply use one node at a time by setting `run_process` to `False` on the node you're not using.
+
+---
+
 ## 🧪 Tested On
 
 **NOT Tested:**
-I have not tested, this is a work in progress based on my working Dropbox DropSend Node version.
-
+This is a development version based on the working DropSend Node. Community testing welcome!
 
 **Community Testing Needed:**
+- macOS — *Please test and report any issues or suggestions!*
 - Windows 10/11 — *Please test and report any issues or suggestions!*
 - Linux (Ubuntu, Fedora, Arch) — *Please test and report any issues or suggestions!*
 
-If you encounter any problems on Windows or Linux, please open an issue on GitHub with:
+If you encounter any problems, please open an issue on GitHub with:
 - Your OS version
 - Python version
 - Error messages (if any)
