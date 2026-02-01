@@ -1,115 +1,123 @@
-"""
-DriveSend AutoUploader Node
-Monitors output folder and uploads new files to Google Drive
-"""
+# drivesend_uploader_node.py
+# DriveSend AutoUploader Node - monitors output folder and uploads to Google Drive
 
 import os
+import threading
+import logging
+import time
 from pathlib import Path
+from watchdog.observers import Observer
+from .monitor_output import start_monitoring, stop_monitoring, watcher_observer, stop_queue_processor
+from .encrypt_file import FileEncryptHandler, ENCRYPT_EXTENSIONS, get_encryption_key
+from .encrypt_file import stop_queue_processor as stop_encrypt_queue_processor
+from .encrypt_file import reset_queue_processor as reset_encrypt_queue_processor
 
-from .monitor_output import start_monitor, stop_monitor, get_monitor
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('drivesend.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Define encrypt_observer at module level
+encrypt_observer = None
 
 
 class DriveSendAutoUploaderNode:
     """ComfyUI node for automatic Google Drive uploads."""
     
     CATEGORY = "DriveSend"
-    FUNCTION = "run"
+    FUNCTION = "start"
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("status",)
     OUTPUT_NODE = True
     
     @classmethod
     def INPUT_TYPES(cls):
+        # Try to get default watch folder
+        default_watch = os.path.join(os.getcwd(), "output")
+        
         return {
             "required": {
+                "watch_folder": ("STRING", {"default": default_watch}),
                 "auth_method": (["oauth", "service_account"], {"default": "oauth"}),
-                "run_process": ("BOOLEAN", {"default": True}),
                 "enable_encryption": ("BOOLEAN", {"default": False}),
-                "Subfolder_Monitor": ("BOOLEAN", {"default": True}),
                 "Post_Delete_Enc": ("BOOLEAN", {"default": False}),
-            },
-            "optional": {
-                "watch_folder": ("STRING", {
-                    "default": "",
-                    "multiline": False,
-                    "tooltip": "Folder to monitor (leave blank for ComfyUI output folder)"
-                }),
+                "Subfolder_Monitor": ("BOOLEAN", {"default": True}),
+                "run_process": ("BOOLEAN", {"default": True, "label": "Run Process"}),
             }
         }
     
-    def run(self, auth_method, run_process, enable_encryption, Subfolder_Monitor, 
-            Post_Delete_Enc, watch_folder=""):
+    def start(self, watch_folder, auth_method, enable_encryption, Post_Delete_Enc, 
+              Subfolder_Monitor, run_process):
         """
         Start or stop the Google Drive upload monitor.
         
-        Args:
-            auth_method: 'oauth' or 'service_account'
-            run_process: True to start, False to stop
-            enable_encryption: Encrypt files before upload
-            Subfolder_Monitor: Monitor subfolders recursively
-            Post_Delete_Enc: Delete .enc files after upload
-            watch_folder: Folder to monitor (default: ComfyUI output)
+        When encryption is enabled, two watchers run:
+        1. Encrypt watcher: Creates .enc copies of new images (preserves originals)
+        2. Upload watcher: Uploads .enc files to Google Drive
+        
+        This preserves original files so ComfyUI maintains sequential naming.
         """
+        global encrypt_observer
         
-        # Stop if requested
+        logger.info(f"[DriveSend] Starting AutoUploader: watch_folder={watch_folder}, "
+                   f"auth_method={auth_method}, encryption={enable_encryption}, "
+                   f"Post_Delete_Enc={Post_Delete_Enc}, Subfolder_Monitor={Subfolder_Monitor}, "
+                   f"run_process={run_process}")
+
+        # Handle stopping the process
         if not run_process:
-            monitor = get_monitor()
-            if monitor and monitor.is_running():
-                stop_monitor()
-                return ("⏹️ DriveSend monitor stopped.",)
-            else:
-                return ("ℹ️ Monitor was not running.",)
-        
-        # Determine watch folder
-        if watch_folder:
-            watch_path = Path(watch_folder)
-        else:
-            # Default to ComfyUI output folder
-            # Try common locations
-            possible_paths = [
-                Path("/workspace/ComfyUI/output"),  # RunPod
-                Path("./output"),  # Relative
-                Path(__file__).parent.parent.parent / "output",  # Relative to node
-            ]
+            logger.info("[DriveSend] Stopping AutoUploader monitoring")
             
-            watch_path = None
-            for p in possible_paths:
-                if p.exists():
-                    watch_path = p
-                    break
+            # Stop upload watcher
+            if watcher_observer and watcher_observer.is_alive():
+                stop_monitoring()
+                logger.info("[DriveSend] Upload watcher stopped")
             
-            if not watch_path:
-                return ("❌ Error: Could not find ComfyUI output folder. Please specify watch_folder.",)
-        
+            # Stop encryption watcher
+            if encrypt_observer and encrypt_observer.is_alive():
+                encrypt_observer.stop()
+                encrypt_observer.join()
+                logger.info("[DriveSend] Encryption watcher stopped")
+            
+            # Stop queue processors
+            stop_queue_processor()
+            stop_encrypt_queue_processor()
+            
+            stop_message = f"""
+=====================================================================
+🚙🛑 DriveSend - AutoUploader - STOPPED
+=====================================================================
+All monitoring, uploading, and encryption processes for {watch_folder} have been stopped.
+Set 'run_process' to True and run the node again to resume.
+=====================================================================
+"""
+            print(stop_message)
+            return (f"All monitoring stopped for {watch_folder}",)
+
+        # Validate watch_folder
+        watch_path = Path(watch_folder)
         if not watch_path.exists():
-            return (f"❌ Error: Watch folder does not exist: {watch_path}",)
-        
+            logger.error(f"[DriveSend] Watch folder does not exist: {watch_folder}")
+            return (f"❌ Error: Watch folder does not exist: {watch_folder}",)
+        if not watch_path.is_dir():
+            logger.error(f"[DriveSend] Watch folder is not a directory: {watch_folder}")
+            return (f"❌ Error: Watch folder is not a directory: {watch_folder}",)
+
         # Get folder ID from environment
-        effective_folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
-        if not effective_folder_id:
+        folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
+        if not folder_id:
             return (
                 "❌ Error: GOOGLE_DRIVE_FOLDER_ID not set.\n\n"
                 "Run the DriveSend Setup node first, then:\n"
                 "1. Copy credentials to RunPod Secrets\n"
                 "2. Restart pod with environment variables loaded",
             )
-        
-        # Check for encryption key if encryption is enabled
-        if enable_encryption:
-            enc_key = (
-                os.environ.get('COMFYUI_ENCRYPTION_KEY') or
-                os.environ.get('comfyui_encryption_key') or
-                os.environ.get('DROPSEND_ENCRYPTION_KEY') or
-                os.environ.get('DRIVESEND_ENCRYPTION_KEY') or
-                os.environ.get('RUNPOD_SECRET_COMFYUI_ENCRYPTION_KEY')
-            )
-            if not enc_key:
-                return (
-                    "❌ Error: Encryption enabled but no key found.\n\n"
-                    "Set COMFYUI_ENCRYPTION_KEY environment variable\n"
-                    "or run DriveSend Setup with encryption enabled.",
-                )
-        
+
         # Validate auth method requirements
         if auth_method == 'oauth':
             client_id = os.environ.get('GOOGLE_CLIENT_ID')
@@ -117,7 +125,6 @@ class DriveSendAutoUploaderNode:
             refresh_token = os.environ.get('GOOGLE_REFRESH_TOKEN')
             
             if not all([client_id, client_secret, refresh_token]):
-                # Check for token.json file as fallback
                 token_file = Path(__file__).parent / 'token.json'
                 if not token_file.exists():
                     return (
@@ -137,40 +144,93 @@ class DriveSendAutoUploaderNode:
                 return (
                     "❌ Error: Service account credentials not found.\n\n"
                     "Either:\n"
-                    "1. Set GOOGLE_SERVICE_ACCOUNT_JSON environment variable (base64)\n"
+                    "1. Set GOOGLE_SERVICE_ACCOUNT_JSON environment variable\n"
                     "2. Place service_account.json in the node folder\n\n"
-                    "⚠️ NOTE: Service accounts only work with Google Workspace (paid).\n"
+                    "⚠️ NOTE: Service accounts only work with Google Workspace.\n"
                     "For personal Gmail, use OAuth instead.",
                 )
-        
-        # Start the monitor
+
+        # Validate encryption key if enabled
+        if enable_encryption:
+            enc_key = get_encryption_key()
+            if not enc_key:
+                logger.error("[DriveSend] Encryption enabled but no encryption key found")
+                return (
+                    "❌ Error: Encryption enabled but no key found.\n\n"
+                    "Set COMFYUI_ENCRYPTION_KEY environment variable\n"
+                    "or run DriveSend Setup with encryption enabled.",
+                )
+
+        # Reset queue processors before starting
+        from .monitor_output import reset_queue_processor as reset_upload_queue
+        reset_upload_queue()
+        reset_encrypt_queue_processor()
+
+        # Start upload monitor
         try:
-            monitor = start_monitor(
-                watch_dir=str(watch_path),
-                folder_id=effective_folder_id,
-                recursive=Subfolder_Monitor,
+            start_monitoring(
+                watch_folder=watch_folder,
+                folder_id=folder_id,
+                auth_method=auth_method,
                 enable_encryption=enable_encryption,
-                post_delete_enc=Post_Delete_Enc,
-                auth_method=auth_method
+                delete_enc=Post_Delete_Enc,
+                subfolder_monitor=Subfolder_Monitor
             )
-            
-            status_lines = [
-                "✅ DriveSend monitor started!",
-                "",
-                f"📁 Watching: {watch_path}",
-                f"☁️ Uploading to: Google Drive folder {effective_folder_id[:20]}...",
-                f"🔐 Auth method: {auth_method}",
-                f"🔒 Encryption: {'Enabled' if enable_encryption else 'Disabled'}",
-                f"📂 Subfolder monitoring: {'Enabled' if Subfolder_Monitor else 'Disabled'}",
-                "",
-                "New files will be uploaded automatically.",
-                "Set run_process to False to stop.",
-            ]
-            
-            return ("\n".join(status_lines),)
-            
         except Exception as e:
-            return (f"❌ Error starting monitor: {e}",)
+            logger.error(f"[DriveSend] Failed to start upload monitor: {e}")
+            return (f"❌ Error starting upload monitor: {e}",)
+
+        # Start encryption watcher if enabled (separate from upload watcher)
+        if enable_encryption:
+            # Stop existing encrypt observer if running
+            if encrypt_observer and encrypt_observer.is_alive():
+                encrypt_observer.stop()
+                encrypt_observer.join()
+            
+            encrypt_handler = FileEncryptHandler(watch_folder, False, Subfolder_Monitor)
+            encrypt_observer = Observer()
+            encrypt_observer.schedule(encrypt_handler, watch_folder, recursive=Subfolder_Monitor)
+            encrypt_observer.start()
+            logger.info(f"[DriveSend] Starting encryption monitor for {watch_folder}")
+
+            def keep_encrypt_alive():
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    if encrypt_observer:
+                        encrypt_observer.stop()
+                if encrypt_observer:
+                    encrypt_observer.join()
+
+            threading.Thread(target=keep_encrypt_alive, daemon=True).start()
+
+        # Build status message
+        status_lines = [
+            "✅ DriveSend AutoUploader started!",
+            "",
+            f"📁 Watching: {watch_folder}",
+            f"☁️ Uploading to: Google Drive folder {folder_id[:20]}...",
+            f"🔐 Auth method: {auth_method}",
+            f"🔒 Encryption: {'Enabled (creating .enc copies)' if enable_encryption else 'Disabled'}",
+            f"📂 Subfolder monitoring: {'Enabled' if Subfolder_Monitor else 'Disabled'}",
+            f"🗑️ Delete .enc after upload: {'Yes' if Post_Delete_Enc else 'No'}",
+            "",
+        ]
+        
+        if enable_encryption:
+            status_lines.extend([
+                "⚠️ Note: Original files are preserved for ComfyUI naming.",
+                "   You must manually delete files from output folder.",
+                "",
+            ])
+        
+        status_lines.extend([
+            "New files will be uploaded automatically.",
+            "Set run_process to False to stop.",
+        ])
+
+        return ("\n".join(status_lines),)
 
 
 # Node registration
@@ -179,5 +239,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "DriveSendAutoUploader": "DriveSend AutoUploader"
+    "DriveSendAutoUploader": "🚙📤 DriveSend - AutoUploader"
 }
