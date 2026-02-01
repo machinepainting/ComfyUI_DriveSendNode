@@ -63,6 +63,7 @@ class OutputMonitor:
         enable_encryption=False,
         post_delete_enc=False,
         auth_method='service_account',
+        owner_email=None,
         **auth_kwargs
     ):
         self.watch_dir = Path(watch_dir)
@@ -71,6 +72,7 @@ class OutputMonitor:
         self.enable_encryption = enable_encryption
         self.post_delete_enc = post_delete_enc
         self.auth_method = auth_method
+        self.owner_email = owner_email or os.environ.get('GOOGLE_OWNER_EMAIL')
         self.auth_kwargs = auth_kwargs
         
         self.upload_queue = queue.Queue()
@@ -114,11 +116,13 @@ class OutputMonitor:
                     else:
                         print("[DriveSend] Warning: Encryption enabled but no key found")
                 
-                # Upload file
+                # Upload file with owner_email for ownership transfer
                 result = upload_file(
                     file_to_upload,
                     folder_id=self.folder_id,
-                    service=self.service
+                    service=self.service,
+                    auth_method=self.auth_method,
+                    owner_email=self.owner_email
                 )
                 
                 if result['success']:
@@ -165,6 +169,10 @@ class OutputMonitor:
             print("[DriveSend] Recursive monitoring enabled")
         if self.enable_encryption:
             print("[DriveSend] Encryption enabled")
+        if self.owner_email:
+            print(f"[DriveSend] Ownership will transfer to: {self.owner_email}")
+        elif self.auth_method == 'service_account':
+            print("[DriveSend] WARNING: No owner_email set - uploads may fail due to quota!")
     
     def stop(self):
         """Stop monitoring the directory."""

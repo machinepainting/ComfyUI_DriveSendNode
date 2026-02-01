@@ -108,7 +108,8 @@ class DriveSendAutoUploaderNode:
                     recursive=Subfolder_Monitor,
                     enable_encryption=enable_encryption,
                     post_delete_enc=Post_Delete_Enc,
-                    auth_method=auth_method
+                    auth_method=auth_method,
+                    owner_email=effective_owner_email
                 )
                 
                 status_lines.append(f"✓ Monitor started")
