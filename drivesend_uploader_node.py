@@ -34,16 +34,11 @@ class DriveSendAutoUploaderNode:
                     "multiline": False,
                     "tooltip": "Folder to monitor (leave blank for ComfyUI output folder)"
                 }),
-                "folder_id": ("STRING", {
-                    "default": "",
-                    "multiline": False,
-                    "tooltip": "Google Drive folder ID (uses env var if blank)"
-                }),
             }
         }
     
     def run(self, auth_method, run_process, enable_encryption, Subfolder_Monitor, 
-            Post_Delete_Enc, watch_folder="", folder_id=""):
+            Post_Delete_Enc, watch_folder=""):
         """
         Start or stop the Google Drive upload monitor.
         
@@ -54,7 +49,6 @@ class DriveSendAutoUploaderNode:
             Subfolder_Monitor: Monitor subfolders recursively
             Post_Delete_Enc: Delete .enc files after upload
             watch_folder: Folder to monitor (default: ComfyUI output)
-            folder_id: Google Drive folder ID (default: from env var)
         """
         
         # Stop if requested
@@ -90,15 +84,14 @@ class DriveSendAutoUploaderNode:
         if not watch_path.exists():
             return (f"❌ Error: Watch folder does not exist: {watch_path}",)
         
-        # Get folder ID from parameter or environment
-        effective_folder_id = folder_id or os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
+        # Get folder ID from environment
+        effective_folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
         if not effective_folder_id:
             return (
-                "❌ Error: No folder_id provided.\n\n"
-                "Either:\n"
-                "1. Set the folder_id parameter in this node\n"
-                "2. Set GOOGLE_DRIVE_FOLDER_ID environment variable\n"
-                "3. Run the DriveSend Setup node first",
+                "❌ Error: GOOGLE_DRIVE_FOLDER_ID not set.\n\n"
+                "Run the DriveSend Setup node first, then:\n"
+                "1. Copy credentials to RunPod Secrets\n"
+                "2. Restart pod with environment variables loaded",
             )
         
         # Check for encryption key if encryption is enabled

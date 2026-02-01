@@ -203,14 +203,31 @@ class DriveSendSetupNode:
         print("="*60)
         print("\nCopy these values to your Environment Variables:\n")
         
+        # Print FULL values (not truncated)
         for key, value in env_vars.items():
-            # Truncate long values for display
-            display_value = value if len(value) < 50 else value[:47] + "..."
-            print(f"{key}={display_value}")
+            print(f"{key}={value}")
         
         print("\n" + "="*60)
-        print("See console output above for full values to copy")
+        print("Copy the values above to your RunPod Secrets")
         print("="*60 + "\n")
+        
+        # Save token.json for local use
+        if auth_method == 'oauth' and 'GOOGLE_REFRESH_TOKEN' in env_vars:
+            token_file = NODE_DIR / 'token.json'
+            try:
+                token_data = {
+                    "token": None,
+                    "refresh_token": env_vars['GOOGLE_REFRESH_TOKEN'],
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "client_id": env_vars['GOOGLE_CLIENT_ID'],
+                    "client_secret": env_vars['GOOGLE_CLIENT_SECRET'],
+                    "scopes": ["https://www.googleapis.com/auth/drive.file"]
+                }
+                with open(token_file, 'w') as f:
+                    json.dump(token_data, f, indent=2)
+                results.append(f"✓ Saved token.json for local use")
+            except Exception as e:
+                results.append(f"⚠️ Could not save token.json: {e}")
         
         # Save to .env file if requested
         if storage_method == 'env_file':
