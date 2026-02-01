@@ -373,17 +373,6 @@ For detailed instructions, see the [Google Workspace documentation](https://clou
 
 ---
 
-## 📊 Comparison: DriveSend vs DropSend
-
-| Feature | DriveSend (Google Drive) | DropSend (Dropbox) |
-|---------|-------------------------|-------------------|
-| Free with personal account | ✅ Yes (OAuth) | ✅ Yes |
-| Storage (free tier) | 15 GB | 2 GB |
-| Token management | Auto-refresh | Auto-refresh |
-| Setup complexity | Medium | Easy |
-
----
-
 ## License
 
 MIT
