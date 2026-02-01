@@ -1,8 +1,17 @@
 # ComfyUI DriveSend Node
 
-A ComfyUI custom node for seamless Google Drive uploads with **optional** encryption capabilities. Automatically upload your ComfyUI output files (images and videos) to Google Drive cloud storage — with or without encryption.
+A ComfyUI custom node for seamless Google Drive uploads with **optional** encryption capabilities. Automatically upload your ComfyUI output files (images and videos) to Google Drive cloud storage.
 
-> ⚠️ **Note:** This is a development/untested version based on the working [DropSend Node](https://github.com/machinepainting/ComfyUI_DropSendNode). Community testing welcome!
+## ⚠️ Authentication Methods - READ FIRST
+
+| Method | Lifespan | Best For | Effort |
+|--------|----------|----------|--------|
+| **Service Account** | ✅ **Permanent** (never expires) | Cloud/RunPod | Medium setup |
+| **OAuth 2.0** | ❌ **7 days** (must re-auth weekly) | Not recommended | Easy setup |
+
+**We strongly recommend Service Account** for any persistent use. OAuth tokens expire every 7 days in Google's "testing mode" and there is no workaround without paying for Google Workspace or going through Google's app verification process.
+
+---
 
 ## 🔄 How It Works
 
@@ -35,459 +44,216 @@ A ComfyUI custom node for seamless Google Drive uploads with **optional** encryp
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Encryption is completely optional.** If you don't need it, simply leave `enable_encryption` off and your files upload directly to Google Drive as-is. Enable encryption only if you want an extra layer of security for your files in cloud storage.
-
-## 📤📦 Features
-
-- **📤📦 DriveSend AutoUploader Node**
-  Automatically uploads newly created files to Google Drive with optional file encryption capabilities.
-
-  - Monitors a specified folder (e.g., ComfyUI's `output/`) in real time, with optional recursive subfolder monitoring.
-  - Supports common ComfyUI file types: `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.mp4`, `.avi`, `.mov`.
-  - Optional encryption of files before upload, creating `.enc` files using a secure Fernet key (AES-128).
-  - Configurable toggles for:
-    - `enable_encryption`: Encrypt files before upload (default: off).
-    - `Post_Delete_Enc`: Delete encrypted `.enc` files after upload verification (default: off).
-    - `Subfolder_Monitor`: Monitor subfolders in the watch directory (default: on).
-    - `run_process`: Start or stop the monitoring and uploading process (default: on).
-  - Uses a queue system to ensure reliable processing of files, even under high load, preventing skipped files.
-  - Verifies upload integrity using SHA256 checksums to ensure files are not corrupted during transfer.
-
-- **🛠️📦 DriveSend Setup Node**
-  Streamlines Google Drive API access setup and encryption key management.
-
-  - Supports two authentication methods:
-    - **Service Account** (Recommended for cloud/RunPod): No browser interaction needed after initial setup.
-    - **OAuth 2.0**: For local setups where you want to use your personal Google account.
-  - Provides API credentials and optional encryption key for easy integration into Environment Variables and RunPod Secrets.
-  - Supports two storage methods:
-    - `env_file`: Saves credentials to a `.env` file (recommended for local user setups).
-    - `display_only`: Displays credentials in the console for manual copying (recommended for cloud setups like RunPod).
-  - Supports three encryption key methods:
-    - `off`: No encryption key is generated (use if encryption is not needed).
-    - `Display Only`: Displays the encryption key in the console with other credentials.
-    - `save to .env`: Saves the encryption key to the `.env` file.
-
-- **🔐📁 Standalone Decryption Scripts (Local Use Only)**
-  Decrypt `.enc` files on your local machine using the included scripts in the `/scripts/` folder.
-
-  - **Local use only** — Run these on your computer after downloading/syncing encrypted files from Google Drive.
-  - Cross-platform support for macOS, Windows, and Linux.
-  - Restores encrypted files back to their original format (PNG, JPG, MP4, etc.).
-  - Supports recursive folder processing.
-  - Option to organize `.enc` files after decryption.
-  - Includes optional encryption scripts for manual local encryption (not needed for normal DriveSend operation).
-
 ---
 
-## 💾📦 Installation
-
-Clone this repository into the `ComfyUI/custom_nodes/` directory:
+## 💾 Installation
 
 ```bash
 cd ComfyUI/custom_nodes/
 git clone https://github.com/machinepainting/ComfyUI_DriveSendNode.git
-```
-
-Install dependencies:
-
-```bash
+cd ComfyUI_DriveSendNode
 pip install -r requirements.txt
 ```
 
 ---
 
-## 🔧📦 Google Drive Setup Instructions
+## 🔧 Google Cloud Setup (Service Account - Recommended)
 
-### Option A: Service Account (Recommended for Cloud/RunPod)
+### Step 1: Create Google Cloud Project
 
-Service accounts allow server-to-server authentication without browser interaction — ideal for cloud deployments.
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Sign in with a **personal Gmail account** (not work/school - they often have restrictions)
+3. Click **Select a project** → **New Project**
+4. Name it (e.g., `ComfyUI-DriveSend`) → **Create**
 
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or select an existing one)
-3. Enable the Google Drive API:
-   - Navigate to **APIs & Services > Library**
-   - Search for "Google Drive API"
-   - Click **Enable**
+### Step 2: Enable Google Drive API
 
-4. Create a Service Account:
-   - Navigate to **IAM & Admin > Service Accounts**
-   - Click **Create Service Account**
-   - Enter a name (e.g., `comfyui-drivesend`)
-   - Click **Create and Continue**
-   - Skip the optional steps, click **Done**
+1. Go to **APIs & Services** → **Library**
+2. Search for **Google Drive API**
+3. Click **Enable**
 
-5. Create and Download the Key:
-   - Click on your newly created service account
-   - Go to the **Keys** tab
-   - Click **Add Key > Create new key**
-   - Select **JSON** and click **Create**
-   - Save the downloaded file as `service_account.json`
+### Step 3: Create Service Account
 
-6. Share Your Google Drive Folder:
-   - Open Google Drive and create a folder for uploads (e.g., `ComfyUI_Output`)
-   - Right-click the folder > **Share**
-   - Add the service account email (found in `service_account.json` as `client_email`)
-   - Give it **Editor** access
-   - Copy the **Folder ID** from the URL (the long string after `/folders/`)
+1. Go to **IAM & Admin** → **Service Accounts**
+2. Click **+ Create Service Account**
+3. Name it (e.g., `comfyui-uploader`)
+4. Click **Create and Continue**
+5. Skip optional steps → **Done**
 
-### Option B: OAuth 2.0 (For Local/Personal Use)
+### Step 4: Fix Organization Policy (IMPORTANT - New Google Accounts)
 
-OAuth allows you to upload to your personal Google Drive account.
+Google now blocks service account key creation by default. You MUST disable this policy first.
 
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or select an existing one)
-3. Enable the Google Drive API (same as above)
+#### 4a. Grant Yourself Policy Admin Role
 
-4. Configure OAuth Consent Screen:
-   - Navigate to **APIs & Services > OAuth consent screen**
-   - Select **External** (unless you have Google Workspace)
-   - Fill in the required fields (App name, support email)
-   - Add your email as a test user
-   - Save
+1. Go to **IAM & Admin** → **IAM**
+2. Click the dropdown at top-left and select your **organization** (your email domain), not the project
+3. Click **+ Grant Access**
+4. Principal: **your email**
+5. Role: search for **Organization Policy Administrator**
+6. Click **Save**
 
-5. Create OAuth Credentials:
-   - Navigate to **APIs & Services > Credentials**
-   - Click **Create Credentials > OAuth client ID**
-   - Select **Desktop app**
-   - Download the JSON file as `credentials.json`
+#### 4b. Enable the Organization Policy API
 
----
-
-## 🏃‍♂️‍➡️🫛📦 DriveSend Setup Node Instructions (RunPod & Cloud Users)
-
-Using Service Account authentication (recommended for cloud):
-
-1. Upload your `service_account.json` to a secure location on your pod, or encode it as base64 and store as an environment variable.
-
-2. Open the 'DriveSend Setup Node' in your ComfyUI and configure:
-
-   - `auth_method`              [ service_account ]
-   - `service_account_json`     [ path to service_account.json OR leave blank if using env var ]
-   - `folder_id`                [ paste your Google Drive folder ID ]
-   - `storage_method`           [ display_only ]
-   - `encryption_key_method`    [ Display Only ] (or off if not needed)
-
-3. Click 'Run' on the node. Note the returned credentials in the terminal:
+Open **Cloud Shell** (terminal icon at top-right) and run:
 
 ```bash
-GOOGLE_DRIVE_FOLDER_ID=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-GOOGLE_SERVICE_ACCOUNT_JSON=<base64 encoded or path>
-comfyui_encryption_key=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX (if encryption enabled)
+gcloud services enable orgpolicy.googleapis.com --project=YOUR_PROJECT_ID
 ```
 
-4. For RunPod users, create secrets:
+Replace `YOUR_PROJECT_ID` with your actual project ID.
 
-   | Secret Name | Secret Value |
-   |-------------|--------------|
-   | `GOOGLE_DRIVE_FOLDER_ID` | Your folder ID |
-   | `GOOGLE_SERVICE_ACCOUNT_JSON` | Base64-encoded service account JSON |
-   | `comfyui_encryption_key` | Your encryption key (if using encryption) |
+#### 4c. Disable the Key Creation Restrictions
 
-5. Add Environment Variables to your RunPod Pod:
-   - `GOOGLE_DRIVE_FOLDER_ID` → `{{ RUNPOD_SECRET_GOOGLE_DRIVE_FOLDER_ID }}`
-   - `GOOGLE_SERVICE_ACCOUNT_JSON` → `{{ RUNPOD_SECRET_GOOGLE_SERVICE_ACCOUNT_JSON }}`
-   - `comfyui_encryption_key` → `{{ RUNPOD_SECRET_comfyui_encryption_key }}`
-
-6. Add the DriveSend AutoUploader Node to your workflow and run!
-
----
-
-## 🛠️💻📦 DriveSend Setup Node Instructions (Local Computer Users)
-
-Using OAuth 2.0 authentication:
-
-1. Place your `credentials.json` in the `ComfyUI_DriveSendNode` folder
-
-2. Open the 'DriveSend Setup Node' in your ComfyUI and configure:
-
-   - `auth_method`              [ oauth ]
-   - `folder_id`                [ paste your Google Drive folder ID ] (optional - uploads to root if blank)
-   - `storage_method`           [ env_file ]
-   - `encryption_key_method`    [ save to .env ] (or off if not needed)
-
-3. Click 'Run' on the node. A browser window will open for Google authentication.
-
-4. After authenticating, a `token.json` file will be created automatically.
-
-5. Restart ComfyUI and add the DriveSend AutoUploader Node to your workflow.
-
----
-
-## 🔑📦 Encryption Key Management
-
-If you enable encryption in the DriveSend AutoUploader Node, an encryption key is generated during setup (unless `encryption_key_method` is `off`). This key is **required** to decrypt `.enc` files downloaded from Google Drive.
-
-### Saving the Encryption Key
-
-**Display Only (Recommended for Cloud):**
-
-If `encryption_key_method` is `Display Only`, the key is shown in the console:
-
-```
-comfyui_encryption_key=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-```
-
-Copy the key and store it securely using one of the methods below.
-
-**Save to .env (Recommended for Local):**
-
-If `encryption_key_method` is `save to .env`, the key is saved in `ComfyUI/custom_nodes/ComfyUI_DriveSendNode/.env` as:
-
-```
-comfyui_encryption_key=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-```
-
-Ensure the `.env` file is excluded from version control (add to `.gitignore`).
-
----
-
-## 🔐📁 Standalone Decryption Scripts (Local Use Only)
-
-The `/scripts/` folder contains standalone scripts to decrypt files on your **local machine**.
-
-> ⚠️ **These scripts are for LOCAL USE ONLY.** Run them on your personal computer after downloading or syncing encrypted files from Google Drive. Do not run on cloud instances.
-
-> 💡 **Universal Compatibility:** These scripts work with both DriveSend (Google Drive) and DropSend (Dropbox) nodes. They use the same encryption key (`comfyui_encryption_key`), so you only need to set up key storage once.
-
-### What Are These Scripts For?
-
-**Decryption Scripts** — The primary scripts. Use these on your local machine to decrypt `.enc` files you've downloaded/synced from Google Drive. When encryption is enabled in the DriveSend node, your files are uploaded as encrypted `.enc` files. These scripts restore them to their original format so you can view and use them.
-
-**Encryption Scripts** — Optional utility scripts. You do NOT need these for normal DriveSend operation—the node handles encryption automatically during upload. These are provided for users who want to manually encrypt local files for backup or other purposes using the same key.
-
-### Supported File Types
-
-The scripts support all formats the DriveSend node handles:
-
-- Images: `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`
-- Videos: `.mp4`, `.avi`, `.mov`
-
-When decrypting, the original file extension is preserved (e.g., `video.mp4.enc` → `video.mp4`).
-
-### Prerequisites (All Platforms)
-
-**Python 3.8+** and the **cryptography** library are required:
+Run these commands in Cloud Shell:
 
 ```bash
-pip install cryptography
+gcloud org-policies reset iam.disableServiceAccountKeyCreation --project=YOUR_PROJECT_ID
+
+gcloud org-policies reset iam.managed.disableServiceAccountKeyCreation --project=YOUR_PROJECT_ID
 ```
 
----
+### Step 5: Create and Download the Key
 
-## 🍎 macOS Setup & Usage
+1. Switch back to your **project** (click dropdown top-left, select your project)
+2. Go to **IAM & Admin** → **Service Accounts**
+3. Click on your service account
+4. Go to **Keys** tab
+5. Click **Add Key** → **Create new key** → **JSON** → **Create**
+6. **IMPORTANT:** Rename the downloaded file to exactly: `service_account.json`
 
-### Storing Your Encryption Key in Keychain
+### Step 6: Share Your Google Drive Folder
 
-1. Open **Keychain Access** (search in Spotlight)
-2. Click **File > New Password Item**
-3. Fill in the fields:
-   - **Keychain Item Name:** `ComfyUI_Encryption_Key`
-   - **Account Name:** `ComfyUI`
-   - **Password:** Paste your encryption key
-4. Click **Add**
+1. Go to [Google Drive](https://drive.google.com)
+2. Create a new folder (e.g., `ComfyUI_Uploads`)
+3. Right-click the folder → **Share**
+4. Open your `service_account.json` file and find the `client_email` value (looks like `name@project-id.iam.gserviceaccount.com`)
+5. Paste that email in the Share dialog
+6. Set permission to **Editor**
+7. Click **Share** (uncheck "Notify people" if prompted)
 
-To retrieve later: Search for `ComfyUI_Encryption_Key` in Keychain Access, double-click, check **Show Password**, and authenticate.
+### Step 7: Get Your Folder ID
 
-### Running the Scripts
-
-1. Navigate to the scripts folder:
-   ```bash
-   cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
-   ```
-
-2. Make the script executable (first time only):
-   ```bash
-   chmod +x decrypt_folder_mac.sh
-   chmod +x encrypt_folder_mac.sh
-   ```
-
-3. Run the decryption script:
-   ```bash
-   ./decrypt_folder_mac.sh
-   ```
-
-4. When prompted:
-   - Drag and drop the folder containing `.enc` files into the terminal, or type the path
-   - Choose whether to process subfolders recursively (Y/N)
-   - Optionally move `.enc` files to a separate folder after decryption
+1. Open the folder in Google Drive
+2. Look at the URL: `https://drive.google.com/drive/folders/XXXXXXXXXXXXXXXXX`
+3. Copy the long string after `/folders/` — that's your **Folder ID**
 
 ---
 
-## 🪟 Windows Setup & Usage
+## 🚀 Local Setup (Quick Test)
 
-### Storing Your Encryption Key
-
-**Using Environment Variable (Recommended):**
-
-1. Press `Win + R`, type `sysdm.cpl`, press Enter
-2. Go to **Advanced** tab → **Environment Variables**
-3. Under **User variables**, click **New**
-4. Set:
-   - **Variable name:** `COMFYUI_ENCRYPTION_KEY`
-   - **Variable value:** Your encryption key
-5. Click **OK** to save
-6. Restart any open terminals/command prompts
-
-### Running the Scripts
-
-1. Open **Command Prompt** or **PowerShell**
-
-2. Navigate to the scripts folder:
-   ```cmd
-   cd ComfyUI\custom_nodes\ComfyUI_DriveSendNode\scripts
-   ```
-
-3. Run the decryption script:
-   ```cmd
-   python decrypt_folder_win.py
-   ```
-
-4. When prompted:
-   - Enter the full path to the folder containing `.enc` files
-   - Choose whether to process subfolders recursively (Y/N)
-   - Optionally move `.enc` files to a separate folder after decryption
+1. Place `service_account.json` in the `ComfyUI_DriveSendNode` folder
+2. Add the **DriveSend Setup** node to ComfyUI
+3. Configure:
+   - `auth_method`: **service_account**
+   - `folder_id`: your folder ID
+   - `owner_email`: **your Gmail address** (required!)
+   - `storage_method`: **env_file**
+   - `encryption_key_method`: **off** (for testing)
+4. Run the node
+5. Add **DriveSend AutoUploader** node and run a workflow
 
 ---
 
-## 🐧 Linux Setup & Usage
+## ☁️ RunPod / Cloud Setup (Persistent)
 
-### Storing Your Encryption Key
+### Option A: Custom Template (Recommended - One-Time Setup)
 
-**Option A: Environment Variable (Recommended)**
+1. Run the **DriveSend Setup** node locally with `storage_method`: **display_only**
+2. Copy the output values from the console
+3. In RunPod, go to **Secrets** and create:
 
-Add to your `~/.bashrc` or `~/.zshrc`:
+| Secret Name | Value |
+|-------------|-------|
+| `GOOGLE_DRIVE_FOLDER_ID` | Your folder ID |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | The base64 string from setup |
+| `GOOGLE_OWNER_EMAIL` | Your Gmail address |
+| `comfyui_encryption_key` | (only if using encryption) |
 
-```bash
-export COMFYUI_ENCRYPTION_KEY="your_encryption_key_here"
-```
+4. Create or edit a **Pod Template**:
+   - Click **Edit Template** → **Environment Variables**
+   - Add each variable, linking to secrets:
+     - Key: `GOOGLE_DRIVE_FOLDER_ID` → Value: `{{ RUNPOD_SECRET_GOOGLE_DRIVE_FOLDER_ID }}`
+     - Key: `GOOGLE_SERVICE_ACCOUNT_JSON` → Value: `{{ RUNPOD_SECRET_GOOGLE_SERVICE_ACCOUNT_JSON }}`
+     - Key: `GOOGLE_OWNER_EMAIL` → Value: `{{ RUNPOD_SECRET_GOOGLE_OWNER_EMAIL }}`
+     - Key: `comfyui_encryption_key` → Value: `{{ RUNPOD_SECRET_comfyui_encryption_key }}`
+   - Click **Set Overrides**
 
-Then reload:
+5. Deploy pods using this template — credentials persist automatically!
 
-```bash
-source ~/.bashrc
-```
+### Option B: Manual Environment Variables (Each Pod)
 
-**Option B: Secret Service (GNOME Keyring / KWallet)**
-
-If you have `secret-tool` installed (comes with `libsecret-tools`):
-
-```bash
-# Store the key
-echo -n "your_encryption_key_here" | secret-tool store --label="ComfyUI Encryption Key" service ComfyUI username ComfyUI
-
-# Retrieve the key (for verification)
-secret-tool lookup service ComfyUI username ComfyUI
-```
-
-Install secret-tool if needed:
-
-```bash
-# Debian/Ubuntu
-sudo apt install libsecret-tools
-
-# Fedora
-sudo dnf install libsecret
-
-# Arch
-sudo pacman -S libsecret
-```
-
-### Running the Scripts
-
-1. Navigate to the scripts folder:
-   ```bash
-   cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
-   ```
-
-2. Make the script executable (first time only):
-   ```bash
-   chmod +x decrypt_folder_linux.sh
-   chmod +x encrypt_folder_linux.sh
-   ```
-
-3. Run the decryption script:
-   ```bash
-   ./decrypt_folder_linux.sh
-   ```
-
-4. When prompted:
-   - Enter the full path to the folder containing `.enc` files
-   - Choose whether to process subfolders recursively (Y/N)
-   - Optionally move `.enc` files to a separate folder after decryption
+If you don't want to create a template, manually add the environment variables each time you create a pod. This is more tedious but works the same way.
 
 ---
 
-## 🔄 Cross-Platform Python Script (Alternative)
+## 📋 Node Settings Reference
 
-For maximum compatibility, use the Python script directly on any platform:
+### DriveSend Setup Node
 
-```bash
-cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
-python decrypt_folder.py
-```
+| Field | Description |
+|-------|-------------|
+| `auth_method` | `service_account` (recommended) or `oauth` |
+| `folder_id` | Google Drive folder ID from URL |
+| `owner_email` | **Your Gmail** - required for service account! |
+| `storage_method` | `display_only` (cloud) or `env_file` (local) |
+| `encryption_key_method` | `off`, `Display Only`, or `save to .env` |
+| `service_account_path` | Default: `service_account.json` |
 
-This script will:
+### DriveSend AutoUploader Node
 
-1. Automatically detect your operating system
-2. Check for your encryption key (environment variable, Keychain, or Secret Service)
-3. Prompt for the key if not found
-4. Process all `.enc` files and restore them to their original format
-
----
-
-## ⚠️ Security Best Practices
-
-1. **Never commit your `.env` file** - Ensure `.env` is in your `.gitignore`
-2. **Never commit `service_account.json` or `credentials.json`** - These contain sensitive credentials
-3. **Never commit `token.json`** - This contains your OAuth tokens
-4. **Use secure key storage** - Prefer OS-native credential storage over plain text files
-5. **Backup your encryption key** - Without it, encrypted files cannot be recovered
-6. **Restrict service account permissions** - Only share specific folders, not your entire Drive
-
----
-
-## ⚠️ Important Notes
-
-### Using Both DriveSend and DropSend
-
-If you use both nodes (DriveSend for Google Drive and [DropSend](https://github.com/machinepainting/ComfyUI_DropSendNode) for Dropbox), you only need to store your encryption key **once** using any of the methods above. The scripts check for multiple key names for backward compatibility:
-
-- `COMFYUI_ENCRYPTION_KEY` (recommended)
-- `comfyui_encryption_key`
-- `DRIVESEND_ENCRYPTION_KEY` (legacy)
-- `DROPSEND_ENCRYPTION_KEY` (legacy)
-
-The same applies to Keychain/Secret Service - the scripts will find your key regardless of which name you used.
-
-### Running Both Nodes Simultaneously
-
-If you have both DriveSend and DropSend installed and want to use them at the same time, configure them to watch **different folders** to avoid conflicts. For example:
-
-- DriveSend watches: `ComfyUI/output/gdrive/`
-- DropSend watches: `ComfyUI/output/dropbox/`
-
-Or simply use one node at a time by setting `run_process` to `False` on the node you're not using.
+| Field | Description |
+|-------|-------------|
+| `watch_directory` | Folder to monitor (default: ComfyUI output) |
+| `auth_method` | Must match setup node |
+| `folder_id` | Override folder ID (or leave blank to use env var) |
+| `owner_email` | Override owner email (or leave blank to use env var) |
+| `enable_encryption` | Encrypt files before upload |
+| `Post_Delete_Enc` | Delete .enc files after upload |
+| `Subfolder_Monitor` | Watch subfolders too |
+| `run_process` | Start/stop the monitor |
 
 ---
 
-## 🧪 Tested On
+## ❓ Why is `owner_email` Required?
 
-**NOT Tested:**
-This is a development version based on the working DropSend Node. Community testing welcome!
+**Service accounts have 0 GB storage quota.** When a service account uploads a file, it owns that file — but it has no storage space!
 
-**Community Testing Needed:**
-- macOS — *Please test and report any issues or suggestions!*
-- Windows 10/11 — *Please test and report any issues or suggestions!*
-- Linux (Ubuntu, Fedora, Arch) — *Please test and report any issues or suggestions!*
+The `owner_email` setting transfers ownership to your personal Gmail account after upload, so the file uses YOUR storage quota (15 GB free).
 
-If you encounter any problems, please open an issue on GitHub with:
-- Your OS version
-- Python version
-- Error messages (if any)
-- Steps to reproduce
+Without this, uploads will fail with: `403 storageQuotaExceeded`
 
-Contributions and pull requests are welcome!
+---
+
+## 🔐 Encryption (Optional)
+
+Enable encryption to protect files in cloud storage:
+
+1. In Setup node: set `encryption_key_method` to **Display Only** or **save to .env**
+2. In AutoUploader: set `enable_encryption` to **True**
+3. Save your encryption key securely — you need it to decrypt files!
+
+See the `/scripts/` folder for decryption scripts (run on your local machine after downloading).
+
+---
+
+## 🛠️ Troubleshooting
+
+### "service_account.json NOT FOUND"
+- Rename your downloaded key file to exactly `service_account.json`
+- Place it in the `ComfyUI_DriveSendNode` folder
+
+### "403 storageQuotaExceeded"
+- Set `owner_email` to your Gmail address
+- Make sure the folder is shared with your service account email
+
+### "Organization Policy blocks key creation"
+- Follow Step 4 in the setup guide to disable the policy restrictions
+- Run the gcloud commands in Cloud Shell
+
+### "Permission denied" on upload
+- Make sure you shared the Google Drive folder with the service account email
+- The service account needs **Editor** access
 
 ---
 
@@ -506,14 +272,22 @@ ComfyUI_DriveSendNode/
 ├── README.md
 ├── .gitignore
 └── scripts/
-    ├── decrypt_folder.py          # Cross-platform Python script (recommended)
-    ├── decrypt_folder_mac.sh      # macOS decryption script
-    ├── encrypt_folder_mac.sh      # macOS encryption script (local use only)
-    ├── decrypt_folder_win.py      # Windows decryption script
-    ├── encrypt_folder_win.py      # Windows encryption script (local use only)
-    ├── decrypt_folder_linux.sh    # Linux decryption script
-    └── encrypt_folder_linux.sh    # Linux encryption script (local use only)
+    ├── decrypt_folder.py
+    ├── decrypt_folder_mac.sh
+    ├── encrypt_folder_mac.sh
+    ├── decrypt_folder_win.py
+    ├── encrypt_folder_win.py
+    ├── decrypt_folder_linux.sh
+    └── encrypt_folder_linux.sh
 ```
+
+---
+
+## 🧪 Status
+
+**Testing in Progress** — Based on the working [DropSend Node](https://github.com/machinepainting/ComfyUI_DropSendNode).
+
+Please report issues on GitHub!
 
 ---
 

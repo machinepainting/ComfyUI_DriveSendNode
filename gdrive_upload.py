@@ -1,6 +1,6 @@
 """
 Google Drive Upload Module
-Handles file uploads to Google Drive with integrity verification
+Handles file uploads to Google Drive with integrity verification and ownership transfer
 """
 
 import os
@@ -42,7 +42,52 @@ def calculate_sha256(file_path):
     return sha256_hash.hexdigest()
 
 
-def upload_file(file_path, folder_id=None, service=None, auth_method='service_account', **auth_kwargs):
+def transfer_ownership(service, file_id, owner_email):
+    """
+    Transfer file ownership to a personal Google account.
+    
+    This is required because service accounts have 0 GB storage quota.
+    By transferring ownership, the file counts against the personal account's quota.
+    
+    Args:
+        service: Google Drive API service object
+        file_id: ID of the uploaded file
+        owner_email: Email address to transfer ownership to
+    
+    Returns:
+        bool: True if transfer successful, False otherwise
+    """
+    if not owner_email:
+        return False
+    
+    try:
+        # Create permission with ownership transfer
+        permission = {
+            'type': 'user',
+            'role': 'owner',
+            'emailAddress': owner_email
+        }
+        
+        service.permissions().create(
+            fileId=file_id,
+            body=permission,
+            transferOwnership=True,
+            supportsAllDrives=True
+        ).execute()
+        
+        print(f"[DriveSend] ✓ Ownership transferred to: {owner_email}")
+        return True
+    
+    except HttpError as e:
+        print(f"[DriveSend] ⚠ Could not transfer ownership: {e}")
+        return False
+    except Exception as e:
+        print(f"[DriveSend] ⚠ Ownership transfer error: {e}")
+        return False
+
+
+def upload_file(file_path, folder_id=None, service=None, auth_method='service_account', 
+                owner_email=None, **auth_kwargs):
     """
     Upload a file to Google Drive.
     
@@ -51,6 +96,7 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
         folder_id: Google Drive folder ID (optional, uses env var or root if not provided)
         service: Existing Drive service object (optional)
         auth_method: Authentication method ('service_account' or 'oauth')
+        owner_email: Email to transfer ownership to (required for service account uploads)
         **auth_kwargs: Additional auth arguments
     
     Returns:
@@ -71,6 +117,10 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
     # Get folder ID
     if folder_id is None:
         folder_id = get_folder_id()
+    
+    # Get owner email from parameter or environment
+    if owner_email is None:
+        owner_email = os.environ.get('GOOGLE_OWNER_EMAIL')
     
     # Calculate local hash for verification
     local_hash = calculate_sha256(file_path)
@@ -99,12 +149,25 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
         file = service.files().create(
             body=file_metadata,
             media_body=media,
-            fields='id, name, size, md5Checksum'
+            fields='id, name, size, md5Checksum',
+            supportsAllDrives=True
         ).execute()
         
         file_id = file.get('id')
         remote_size = int(file.get('size', 0))
         local_size = file_path.stat().st_size
+        
+        # Transfer ownership if using service account
+        ownership_transferred = False
+        if auth_method == 'service_account' and owner_email:
+            ownership_transferred = transfer_ownership(service, file_id, owner_email)
+            if not ownership_transferred:
+                print(f"[DriveSend] ⚠ Warning: File uploaded but ownership not transferred.")
+                print(f"[DriveSend]   The file may not persist if service account quota is exceeded.")
+                print(f"[DriveSend]   Make sure GOOGLE_OWNER_EMAIL is set to your personal Gmail.")
+        elif auth_method == 'service_account' and not owner_email:
+            print(f"[DriveSend] ⚠ Warning: No owner_email set. Service accounts have 0 GB quota.")
+            print(f"[DriveSend]   Set GOOGLE_OWNER_EMAIL environment variable to your Gmail address.")
         
         # Verify upload
         size_match = remote_size == local_size
@@ -117,7 +180,8 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
                 'file_name': file.get('name'),
                 'size': remote_size,
                 'local_hash': local_hash,
-                'verified': True
+                'verified': True,
+                'ownership_transferred': ownership_transferred
             }
         else:
             print(f"[DriveSend] ⚠ Upload size mismatch: local={local_size}, remote={remote_size}")
@@ -128,7 +192,8 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
                 'size': remote_size,
                 'local_hash': local_hash,
                 'verified': False,
-                'warning': 'Size mismatch - file may be corrupted'
+                'warning': 'Size mismatch - file may be corrupted',
+                'ownership_transferred': ownership_transferred
             }
     
     except HttpError as e:
@@ -173,7 +238,8 @@ def create_folder(folder_name, parent_folder_id=None, service=None, auth_method=
     try:
         folder = service.files().create(
             body=file_metadata,
-            fields='id, name'
+            fields='id, name',
+            supportsAllDrives=True
         ).execute()
         
         print(f"[DriveSend] Created folder: {folder_name} (ID: {folder.get('id')})")
@@ -217,7 +283,9 @@ def find_folder(folder_name, parent_folder_id=None, service=None, auth_method='s
         results = service.files().list(
             q=query,
             fields='files(id, name)',
-            pageSize=1
+            pageSize=1,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
         ).execute()
         
         files = results.get('files', [])

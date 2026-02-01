@@ -36,6 +36,11 @@ class DriveSendAutoUploaderNode:
                     "multiline": False,
                     "placeholder": "Google Drive Folder ID (uses env var if blank)"
                 }),
+                "owner_email": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "placeholder": "Your Gmail address (required for service account)"
+                }),
                 "enable_encryption": ("BOOLEAN", {"default": False}),
                 "Post_Delete_Enc": ("BOOLEAN", {"default": False}),
                 "Subfolder_Monitor": ("BOOLEAN", {"default": True}),
@@ -54,6 +59,7 @@ class DriveSendAutoUploaderNode:
         auth_method,
         run_process,
         folder_id="",
+        owner_email="",
         enable_encryption=False,
         Post_Delete_Enc=False,
         Subfolder_Monitor=True,
@@ -80,6 +86,20 @@ class DriveSendAutoUploaderNode:
                     status_lines.append(f"Error: Could not create watch directory: {e}")
                     return ("\n".join(status_lines), any_input)
             
+            # Get owner email from field or environment
+            effective_owner_email = owner_email if owner_email else os.environ.get('GOOGLE_OWNER_EMAIL', '')
+            
+            # Warn if using service account without owner email
+            if auth_method == 'service_account' and not effective_owner_email:
+                status_lines.append("⚠ WARNING: No owner_email set!")
+                status_lines.append("  Service accounts have 0 GB storage quota.")
+                status_lines.append("  Set owner_email to your Gmail or set GOOGLE_OWNER_EMAIL env var.")
+                status_lines.append("")
+            
+            # Set owner email in environment for upload module
+            if effective_owner_email:
+                os.environ['GOOGLE_OWNER_EMAIL'] = effective_owner_email
+            
             # Start monitor
             try:
                 monitor = start_monitor(
@@ -96,6 +116,9 @@ class DriveSendAutoUploaderNode:
                 status_lines.append(f"  Auth: {auth_method}")
                 status_lines.append(f"  Recursive: {Subfolder_Monitor}")
                 status_lines.append(f"  Encryption: {enable_encryption}")
+                
+                if effective_owner_email:
+                    status_lines.append(f"  Owner Email: {effective_owner_email}")
                 
                 if folder_id:
                     status_lines.append(f"  Folder ID: {folder_id}")
