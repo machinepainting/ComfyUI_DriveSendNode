@@ -1,4 +1,4 @@
-# ComfyUI DriveSend Node
+# ComfyUI DriveSend Node (ComfyUI >> Google Drive)
 
 Automatically upload your ComfyUI output files to Google Drive with optional encryption. Set it and forget it!
 
