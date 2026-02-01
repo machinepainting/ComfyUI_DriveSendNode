@@ -1,48 +1,41 @@
 # ComfyUI DriveSend Node
 
-A ComfyUI custom node for seamless Google Drive uploads with **optional** encryption capabilities. Automatically upload your ComfyUI output files (images and videos) to Google Drive cloud storage.
-
-## ⚠️ Authentication Methods - READ FIRST
-
-| Method | Lifespan | Best For | Effort |
-|--------|----------|----------|--------|
-| **Service Account** | ✅ **Permanent** (never expires) | Cloud/RunPod | Medium setup |
-| **OAuth 2.0** | ❌ **7 days** (must re-auth weekly) | Not recommended | Easy setup |
-
-**We strongly recommend Service Account** for any persistent use. OAuth tokens expire every 7 days in Google's "testing mode" and there is no workaround without paying for Google Workspace or going through Google's app verification process.
+A ComfyUI custom node for uploading output files to Google Drive with optional encryption. Automatically monitors your output folder and uploads images/videos to your Google Drive.
 
 ---
 
-## 🔄 How It Works
+## ⚠️ Important: Authentication Requirements
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            CLOUD (RunPod, etc.)                             │
-│                                                                             │
-│    ComfyUI generates files ──→ DriveSend Node ──→ Uploads to Google Drive   │
-│        (png, mp4, etc.)         │                                           │
-│                                 │                                           │
-│                                 ▼                                           │
-│                      ┌──────────────────────┐                               │
-│                      │ Encryption OPTIONAL  │                               │
-│                      │ ☐ OFF: file.png      │                               │
-│                      │ ☑ ON:  file.png.enc  │                               │
-│                      └──────────────────────┘                               │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-                             📁 GOOGLE DRIVE
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           YOUR LOCAL MACHINE                                │
-│                                                                             │
-│   Google Drive syncs/downloads ──→ If encrypted: Run decrypt script (local) │
-│                                                 ──→ file.png (viewable!)    │
-│                                                                             │
-│                                   If not encrypted: Ready to use!           │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+DriveSend supports two authentication methods, each with different requirements:
+
+| Method | Account Type | Cost | Token Expiry | Recommended For |
+|--------|-------------|------|--------------|-----------------|
+| **Service Account** | Google Workspace only | ~$7+/month | Never expires | Business/paid users |
+| **OAuth 2.0** | Personal Gmail | Free | Auto-refreshes* | Personal/free users |
+
+**\* OAuth tokens auto-refresh on each pod startup, effectively working like permanent credentials.**
+
+### Why These Limitations?
+
+- **Service Accounts** have 0 GB storage quota on personal Gmail accounts. Google blocks uploads entirely.
+- **Google Workspace** ($7+/month) provides Shared Drives where service accounts can upload.
+- **OAuth 2.0** works with personal Gmail but requires initial browser authorization.
+
+---
+
+## 📤📦 Features
+
+- **DriveSend AutoUploader Node** - Automatically uploads new files to Google Drive
+  - Monitors output folder in real-time
+  - Supports: `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.mp4`, `.avi`, `.mov`
+  - Optional AES-128 encryption before upload
+  - SHA256 checksum verification
+  - Queue system for reliable uploads
+
+- **DriveSend Setup Node** - Configures authentication and credentials
+  - Generates OAuth refresh tokens
+  - Outputs credentials for RunPod environment variables
+  - Optional encryption key generation
 
 ---
 
@@ -51,243 +44,225 @@ A ComfyUI custom node for seamless Google Drive uploads with **optional** encryp
 ```bash
 cd ComfyUI/custom_nodes/
 git clone https://github.com/machinepainting/ComfyUI_DriveSendNode.git
-cd ComfyUI_DriveSendNode
-pip install -r requirements.txt
+pip install -r ComfyUI_DriveSendNode/requirements.txt
 ```
+
+Restart ComfyUI after installation.
 
 ---
 
-## 🔧 Google Cloud Setup (Service Account - Recommended)
+## 🔧 Google Cloud Setup (Required for Both Methods)
 
 ### Step 1: Create Google Cloud Project
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Sign in with a **personal Gmail account** (not work/school - they often have restrictions)
-3. Click **Select a project** → **New Project**
-4. Name it (e.g., `ComfyUI-DriveSend`) → **Create**
+2. Sign in with your Google account
+3. Click **Select a project** (top, next to "Google Cloud" logo) → **New Project**
+4. Name it (e.g., `ComfyUI-DriveSend`) → Click **Create**
+5. Make sure your new project is selected (check dropdown at top)
 
 ### Step 2: Enable Google Drive API
 
-1. Go to **APIs & Services** → **Library**
+1. Go to **APIs & Services** → **Library** (left sidebar)
 2. Search for **Google Drive API**
-3. Click **Enable**
+3. Click on it → Click **Enable**
 
-### Step 3: Create Service Account
+### Step 3: Create OAuth Credentials
+
+1. Go to **APIs & Services** → **Credentials** (left sidebar)
+2. Click **+ Create Credentials** → **OAuth client ID**
+3. If prompted, configure the OAuth consent screen:
+   - User Type: **External** → Click **Create**
+   - App name: `DriveSend`
+   - User support email: Your email
+   - Developer contact: Your email
+   - Click **Save and Continue** through all steps
+4. Back in Credentials, click **+ Create Credentials** → **OAuth client ID**
+5. Application type: **Desktop app**
+6. Name: `DriveSend`
+7. Click **Create**
+8. **Download JSON** and save as `client_secret.json` in the DriveSend node folder:
+   ```
+   ComfyUI/custom_nodes/ComfyUI_DriveSendNode/client_secret.json
+   ```
+
+### Step 4: Add Yourself as Test User
+
+1. Go to **APIs & Services** → **OAuth consent screen**
+2. Under **Test users**, click **+ Add Users**
+3. Add your Gmail address
+4. Click **Save**
+
+---
+
+## 🔐 Option A: OAuth 2.0 Setup (Personal Gmail - FREE)
+
+**Best for:** Personal Gmail accounts, RunPod users who want free Google Drive uploads.
+
+### How It Works
+
+OAuth uses a refresh token that auto-refreshes on every pod startup. You authorize once, and it works indefinitely (as long as you don't revoke access).
+
+### Local Setup
+
+1. Add the **DriveSend Setup** node to your workflow
+2. Configure:
+   - `auth_method`: **oauth**
+   - `storage_method`: **display_only** (for cloud) or **env_file** (for local)
+   - `encryption_key_method`: Your preference
+3. Run the node
+4. A browser window opens - sign in and authorize the app
+5. Copy the credentials from the console output
+
+### RunPod Setup
+
+1. Complete local setup first to get your refresh token
+2. In RunPod, create these **Secrets**:
+   
+   | Secret Name | Value |
+   |-------------|-------|
+   | `GOOGLE_CLIENT_ID` | Your OAuth client ID |
+   | `GOOGLE_CLIENT_SECRET` | Your OAuth client secret |
+   | `GOOGLE_REFRESH_TOKEN` | The refresh token from setup |
+   | `GOOGLE_DRIVE_FOLDER_ID` | Your Drive folder ID |
+   | `comfyui_encryption_key` | (Optional) Your encryption key |
+
+3. Add **Environment Variables** to your pod template:
+   - `GOOGLE_CLIENT_ID` → `{{ RUNPOD_SECRET_GOOGLE_CLIENT_ID }}`
+   - `GOOGLE_CLIENT_SECRET` → `{{ RUNPOD_SECRET_GOOGLE_CLIENT_SECRET }}`
+   - `GOOGLE_REFRESH_TOKEN` → `{{ RUNPOD_SECRET_GOOGLE_REFRESH_TOKEN }}`
+   - `GOOGLE_DRIVE_FOLDER_ID` → `{{ RUNPOD_SECRET_GOOGLE_DRIVE_FOLDER_ID }}`
+   - `comfyui_encryption_key` → `{{ RUNPOD_SECRET_comfyui_encryption_key }}`
+
+4. Deploy your pod and add the **DriveSend AutoUploader** node with:
+   - `auth_method`: **oauth**
+   - `run_process`: **True**
+
+---
+
+## 🏢 Option B: Service Account Setup (Google Workspace - PAID)
+
+**Best for:** Google Workspace subscribers who want simpler, permanent authentication.
+
+**Requirements:**
+- Google Workspace account (~$7+/month)
+- Custom domain (e.g., yourbusiness.com)
+
+### Why Service Account Requires Google Workspace
+
+Service accounts have 0 GB storage quota. On personal Gmail, uploads fail immediately with "storageQuotaExceeded". Google Workspace provides Shared Drives where service accounts CAN upload.
+
+### Setup Steps
 
 1. Go to **IAM & Admin** → **Service Accounts**
 2. Click **+ Create Service Account**
-3. Name it (e.g., `comfyui-uploader`)
-4. Click **Create and Continue**
-5. Skip optional steps → **Done**
+3. Name it (e.g., `comfyui-uploader`) → Click **Create and Continue** → **Done**
+4. Click on the service account → **Keys** tab → **Add Key** → **Create new key** → **JSON**
+5. Rename downloaded file to `service_account.json`
+6. Place in: `ComfyUI/custom_nodes/ComfyUI_DriveSendNode/service_account.json`
 
-### Step 4: Fix Organization Policy (IMPORTANT - New Google Accounts)
+### Create a Shared Drive
 
-Google now blocks service account key creation by default. You MUST disable this policy first.
+1. In Google Drive, click **Shared drives** (left sidebar)
+2. Click **+ New** to create a Shared Drive
+3. Add the service account email as a **Content Manager**
+4. Get the Shared Drive ID from the URL
 
-#### 4a. Grant Yourself Policy Admin Role
+### RunPod Configuration
 
-1. Go to **IAM & Admin** → **IAM**
-2. Click the dropdown at top-left and select your **organization** (your email domain), not the project
-3. Click **+ Grant Access**
-4. Principal: **your email**
-5. Role: search for **Organization Policy Administrator**
-6. Click **Save**
+Create secrets and environment variables similar to OAuth setup, but use:
+- `GOOGLE_SERVICE_ACCOUNT_JSON` (base64-encoded JSON)
+- `GOOGLE_DRIVE_FOLDER_ID` (Shared Drive ID)
 
-#### 4b. Enable the Organization Policy API
+---
 
-Open **Cloud Shell** (terminal icon at top-right) and run:
+## 📁 Getting Your Folder ID
 
+1. Open Google Drive
+2. Navigate to your target folder (or Shared Drive)
+3. Look at the URL:
+   ```
+   https://drive.google.com/drive/folders/XXXXXXXXXXXXXXXXX
+   ```
+4. Copy the long string after `/folders/` - that's your **Folder ID**
+
+---
+
+## 🔒 Encryption (Optional)
+
+DriveSend supports AES-128 encryption for files before upload.
+
+### Enable Encryption
+
+1. In **DriveSend Setup** node, set `encryption_key_method` to **Display Only** or **save to .env**
+2. Run the setup node to generate a key
+3. Save the key securely (you'll need it to decrypt files)
+4. In **DriveSend AutoUploader**, set `enable_encryption` to **True**
+
+### Decrypt Files Locally
+
+Use the scripts in the `/scripts/` folder:
+
+**macOS:**
 ```bash
-gcloud services enable orgpolicy.googleapis.com --project=YOUR_PROJECT_ID
+./scripts/decrypt_folder_mac.sh
 ```
 
-Replace `YOUR_PROJECT_ID` with your actual project ID.
-
-#### 4c. Disable the Key Creation Restrictions
-
-Run these commands in Cloud Shell:
-
+**Windows:**
 ```bash
-gcloud org-policies reset iam.disableServiceAccountKeyCreation --project=YOUR_PROJECT_ID
-
-gcloud org-policies reset iam.managed.disableServiceAccountKeyCreation --project=YOUR_PROJECT_ID
+python scripts/decrypt_folder_win.py
 ```
 
-### Step 5: Create and Download the Key
-
-1. Switch back to your **project** (click dropdown top-left, select your project)
-2. Go to **IAM & Admin** → **Service Accounts**
-3. Click on your service account
-4. Go to **Keys** tab
-5. Click **Add Key** → **Create new key** → **JSON** → **Create**
-6. **IMPORTANT:** Rename the downloaded file to exactly: `service_account.json`
-
-### Step 6: Share Your Google Drive Folder
-
-1. Go to [Google Drive](https://drive.google.com)
-2. Create a new folder (e.g., `ComfyUI_Uploads`)
-3. Right-click the folder → **Share**
-4. Open your `service_account.json` file and find the `client_email` value (looks like `name@project-id.iam.gserviceaccount.com`)
-5. Paste that email in the Share dialog
-6. Set permission to **Editor**
-7. Click **Share** (uncheck "Notify people" if prompted)
-
-### Step 7: Get Your Folder ID
-
-1. Open the folder in Google Drive
-2. Look at the URL: `https://drive.google.com/drive/folders/XXXXXXXXXXXXXXXXX`
-3. Copy the long string after `/folders/` — that's your **Folder ID**
-
----
-
-## 🚀 Local Setup (Quick Test)
-
-1. Place `service_account.json` in the `ComfyUI_DriveSendNode` folder
-2. Add the **DriveSend Setup** node to ComfyUI
-3. Configure:
-   - `auth_method`: **service_account**
-   - `folder_id`: your folder ID
-   - `owner_email`: **your Gmail address** (required!)
-   - `storage_method`: **env_file**
-   - `encryption_key_method`: **off** (for testing)
-4. Run the node
-5. Add **DriveSend AutoUploader** node and run a workflow
-
----
-
-## ☁️ RunPod / Cloud Setup (Persistent)
-
-### Option A: Custom Template (Recommended - One-Time Setup)
-
-1. Run the **DriveSend Setup** node locally with `storage_method`: **display_only**
-2. Copy the output values from the console
-3. In RunPod, go to **Secrets** and create:
-
-| Secret Name | Value |
-|-------------|-------|
-| `GOOGLE_DRIVE_FOLDER_ID` | Your folder ID |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | The base64 string from setup |
-| `GOOGLE_OWNER_EMAIL` | Your Gmail address |
-| `comfyui_encryption_key` | (only if using encryption) |
-
-4. Create or edit a **Pod Template**:
-   - Click **Edit Template** → **Environment Variables**
-   - Add each variable, linking to secrets:
-     - Key: `GOOGLE_DRIVE_FOLDER_ID` → Value: `{{ RUNPOD_SECRET_GOOGLE_DRIVE_FOLDER_ID }}`
-     - Key: `GOOGLE_SERVICE_ACCOUNT_JSON` → Value: `{{ RUNPOD_SECRET_GOOGLE_SERVICE_ACCOUNT_JSON }}`
-     - Key: `GOOGLE_OWNER_EMAIL` → Value: `{{ RUNPOD_SECRET_GOOGLE_OWNER_EMAIL }}`
-     - Key: `comfyui_encryption_key` → Value: `{{ RUNPOD_SECRET_comfyui_encryption_key }}`
-   - Click **Set Overrides**
-
-5. Deploy pods using this template — credentials persist automatically!
-
-### Option B: Manual Environment Variables (Each Pod)
-
-If you don't want to create a template, manually add the environment variables each time you create a pod. This is more tedious but works the same way.
-
----
-
-## 📋 Node Settings Reference
-
-### DriveSend Setup Node
-
-| Field | Description |
-|-------|-------------|
-| `auth_method` | `service_account` (recommended) or `oauth` |
-| `folder_id` | Google Drive folder ID from URL |
-| `owner_email` | **Your Gmail** - required for service account! |
-| `storage_method` | `display_only` (cloud) or `env_file` (local) |
-| `encryption_key_method` | `off`, `Display Only`, or `save to .env` |
-| `service_account_path` | Default: `service_account.json` |
-
-### DriveSend AutoUploader Node
-
-| Field | Description |
-|-------|-------------|
-| `watch_directory` | Folder to monitor (default: ComfyUI output) |
-| `auth_method` | Must match setup node |
-| `folder_id` | Override folder ID (or leave blank to use env var) |
-| `owner_email` | Override owner email (or leave blank to use env var) |
-| `enable_encryption` | Encrypt files before upload |
-| `Post_Delete_Enc` | Delete .enc files after upload |
-| `Subfolder_Monitor` | Watch subfolders too |
-| `run_process` | Start/stop the monitor |
-
----
-
-## ❓ Why is `owner_email` Required?
-
-**Service accounts have 0 GB storage quota.** When a service account uploads a file, it owns that file — but it has no storage space!
-
-The `owner_email` setting transfers ownership to your personal Gmail account after upload, so the file uses YOUR storage quota (15 GB free).
-
-Without this, uploads will fail with: `403 storageQuotaExceeded`
-
----
-
-## 🔐 Encryption (Optional)
-
-Enable encryption to protect files in cloud storage:
-
-1. In Setup node: set `encryption_key_method` to **Display Only** or **save to .env**
-2. In AutoUploader: set `enable_encryption` to **True**
-3. Save your encryption key securely — you need it to decrypt files!
-
-See the `/scripts/` folder for decryption scripts (run on your local machine after downloading).
+**Linux:**
+```bash
+./scripts/decrypt_folder_linux.sh
+```
 
 ---
 
 ## 🛠️ Troubleshooting
 
-### "service_account.json NOT FOUND"
-- Rename your downloaded key file to exactly `service_account.json`
-- Place it in the `ComfyUI_DriveSendNode` folder
+### "storageQuotaExceeded" Error
+- **Cause:** Using service account with personal Gmail
+- **Fix:** Use OAuth instead, or upgrade to Google Workspace
 
-### "403 storageQuotaExceeded"
-- Set `owner_email` to your Gmail address
-- Make sure the folder is shared with your service account email
+### "invalid_grant" Error
+- **Cause:** Refresh token expired or revoked
+- **Fix:** Run setup node again to get new refresh token
 
-### "Organization Policy blocks key creation"
-- Follow Step 4 in the setup guide to disable the policy restrictions
-- Run the gcloud commands in Cloud Shell
+### "Access blocked: App not verified"
+- **Cause:** OAuth consent screen in testing mode
+- **Fix:** Add your email as a test user (Step 4 in Google Cloud Setup)
 
-### "Permission denied" on upload
-- Make sure you shared the Google Drive folder with the service account email
-- The service account needs **Editor** access
+### Files not uploading
+- **Check:** Console output for error messages
+- **Check:** Folder ID is correct
+- **Check:** Auth credentials are set in environment variables
 
----
-
-## 📁 Repository Structure
-
-```
-ComfyUI_DriveSendNode/
-├── __init__.py
-├── drivesend_uploader_node.py
-├── drivesend_setup_node.py
-├── gdrive_upload.py
-├── gdrive_auth_manager.py
-├── encrypt_file.py
-├── monitor_output.py
-├── requirements.txt
-├── README.md
-├── .gitignore
-└── scripts/
-    ├── decrypt_folder.py
-    ├── decrypt_folder_mac.sh
-    ├── encrypt_folder_mac.sh
-    ├── decrypt_folder_win.py
-    ├── encrypt_folder_win.py
-    ├── decrypt_folder_linux.sh
-    └── encrypt_folder_linux.sh
-```
+### Browser doesn't open for OAuth
+- **Cause:** Running on headless server (RunPod)
+- **Fix:** Complete OAuth setup locally first, then copy credentials to RunPod
 
 ---
 
-## 🧪 Status
+## 📊 Comparison: DriveSend vs DropSend
 
-**Testing in Progress** — Based on the working [DropSend Node](https://github.com/machinepainting/ComfyUI_DropSendNode).
+| Feature | DriveSend (Google Drive) | DropSend (Dropbox) |
+|---------|-------------------------|-------------------|
+| Free with personal account | ✅ OAuth only | ✅ Yes |
+| Service account support | ⚠️ Workspace only | N/A |
+| Storage (free tier) | 15 GB | 2 GB |
+| Token management | Auto-refresh | Auto-refresh |
+| Setup complexity | Medium | Easy |
 
-Please report issues on GitHub!
+---
+
+## 🧪 Tested On
+
+- Python 3.10 / 3.11
+- ComfyUI (Feb 2026)
+- RunPod GPU instances
+- Google Drive API v3
 
 ---
 

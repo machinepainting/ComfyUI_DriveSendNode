@@ -1,235 +1,257 @@
 """
 DriveSend Setup Node
-Handles Google Drive API authentication setup and encryption key generation
+Handles Google Drive API authentication setup for both OAuth and Service Account methods
 """
 
 import os
 import json
 import base64
+import webbrowser
 from pathlib import Path
-
-from .encrypt_file import generate_key
+from cryptography.fernet import Fernet
 
 
 NODE_DIR = Path(__file__).parent
 
 
 class DriveSendSetupNode:
-    """
-    ComfyUI node for setting up Google Drive API access and encryption.
-    """
+    """Setup node for configuring Google Drive authentication."""
+    
+    CATEGORY = "DriveSend"
+    FUNCTION = "setup"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("status",)
+    OUTPUT_NODE = True
     
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "auth_method": (["service_account", "oauth"],),
+                "auth_method": (["oauth", "service_account"], {"default": "oauth"}),
                 "folder_id": ("STRING", {
-                    "default": "",
+                    "default": "", 
                     "multiline": False,
-                    "placeholder": "Google Drive Folder ID (from URL)"
+                    "tooltip": "Google Drive folder ID from URL (after /folders/)"
                 }),
-                "owner_email": ("STRING", {
-                    "default": "",
-                    "multiline": False,
-                    "placeholder": "Your Gmail address (for ownership transfer)"
-                }),
-                "storage_method": (["display_only", "env_file"],),
-                "encryption_key_method": (["off", "Display Only", "save to .env"],),
+                "storage_method": (["display_only", "env_file"], {"default": "display_only"}),
+                "encryption_key_method": (["off", "display_only", "save_to_env"], {"default": "off"}),
             },
             "optional": {
-                "service_account_path": ("STRING", {
-                    "default": "service_account.json",
+                "client_id": ("STRING", {
+                    "default": "",
                     "multiline": False,
-                    "placeholder": "Path to service_account.json"
+                    "tooltip": "OAuth Client ID (from Google Cloud Console)"
                 }),
-                "reconnect": ("BOOLEAN", {"default": False}),
+                "client_secret": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "OAuth Client Secret (from Google Cloud Console)"
+                }),
+                "auth_code": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Authorization code from OAuth flow (leave blank first run)"
+                }),
             }
         }
     
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("status",)
-    FUNCTION = "setup"
-    CATEGORY = "DriveSend"
-    OUTPUT_NODE = True
-    
-    def setup(
-        self,
-        auth_method,
-        folder_id,
-        owner_email,
-        storage_method,
-        encryption_key_method,
-        service_account_path="service_account.json",
-        reconnect=False
-    ):
-        output_lines = []
+    def setup(self, auth_method, folder_id, storage_method, encryption_key_method,
+              client_id="", client_secret="", auth_code=""):
+        """
+        Set up Google Drive authentication.
+        
+        For OAuth:
+        - First run: Opens browser for authorization, displays auth URL
+        - Second run: Exchanges auth code for refresh token
+        
+        For Service Account:
+        - Validates service_account.json exists
+        - Displays environment variable format for RunPod
+        """
+        
+        results = []
         env_vars = {}
         
-        print("\n" + "="*60)
-        print("[DriveSend Setup] Starting configuration...")
-        print("="*60)
+        # Validate folder_id
+        if not folder_id:
+            return ("❌ Error: folder_id is required. Get it from your Google Drive folder URL.",)
         
-        # Handle folder ID
-        if folder_id:
-            env_vars['GOOGLE_DRIVE_FOLDER_ID'] = folder_id
-            output_lines.append(f"✓ Folder ID configured")
-        else:
-            output_lines.append("⚠ No Folder ID provided - will upload to Drive root")
-        
-        # Handle owner email (required for service account)
-        if owner_email:
-            env_vars['GOOGLE_OWNER_EMAIL'] = owner_email
-            output_lines.append(f"✓ Owner Email: {owner_email}")
-        elif auth_method == "service_account":
-            output_lines.append("⚠ WARNING: No owner_email set!")
-            output_lines.append("  Service accounts have 0 GB storage quota.")
-            output_lines.append("  Files will fail to upload without ownership transfer.")
-        
-        # Handle authentication based on method
-        if auth_method == "service_account":
-            # Try to find service account file
-            sa_path = None
-            
-            # Check provided path first
-            if service_account_path:
-                check_path = Path(service_account_path)
-                if check_path.exists():
-                    sa_path = check_path
-                elif (NODE_DIR / service_account_path).exists():
-                    sa_path = NODE_DIR / service_account_path
-            
-            # Fall back to default name in node directory
-            if not sa_path and (NODE_DIR / 'service_account.json').exists():
-                sa_path = NODE_DIR / 'service_account.json'
-            
-            if sa_path:
-                try:
-                    with open(sa_path, 'r') as f:
-                        sa_json = f.read()
-                    
-                    # Base64 encode for environment variable storage
-                    sa_base64 = base64.b64encode(sa_json.encode()).decode()
-                    env_vars['GOOGLE_SERVICE_ACCOUNT_JSON'] = sa_base64
-                    
-                    # Parse to get client email for display
-                    sa_data = json.loads(sa_json)
-                    client_email = sa_data.get('client_email', 'unknown')
-                    
-                    output_lines.append(f"✓ Service Account loaded: {client_email}")
-                    output_lines.append(f"  Make sure your Drive folder is shared with this email!")
-                    
-                    print(f"\n[DriveSend Setup] Service Account: {client_email}")
-                    print(f"[DriveSend Setup] Share your Google Drive folder with: {client_email}")
-                
-                except Exception as e:
-                    output_lines.append(f"✗ Error loading service account: {e}")
-            else:
-                output_lines.append("✗ service_account.json NOT FOUND")
-                output_lines.append("")
-                output_lines.append("Please rename your downloaded JSON key file to:")
-                output_lines.append("  service_account.json")
-                output_lines.append("")
-                output_lines.append("And place it in:")
-                output_lines.append(f"  {NODE_DIR}/")
-                return ("\n".join(output_lines),)
-        
-        elif auth_method == "oauth":
-            output_lines.append("")
-            output_lines.append("⚠ OAuth WARNING:")
-            output_lines.append("  OAuth tokens expire every 7 DAYS in testing mode.")
-            output_lines.append("  You will need to re-authenticate weekly.")
-            output_lines.append("  Service Account is recommended for persistent use.")
-            output_lines.append("")
-            
-            creds_path = NODE_DIR / 'credentials.json'
-            token_path = NODE_DIR / 'token.json'
-            
-            if creds_path.exists():
-                output_lines.append("✓ OAuth credentials.json found")
-                
-                if token_path.exists() and not reconnect:
-                    output_lines.append("✓ Existing token.json found - already authenticated")
-                else:
-                    output_lines.append("→ Run the AutoUploader node to complete OAuth authentication")
-                    if reconnect:
-                        try:
-                            token_path.unlink()
-                            output_lines.append("  Deleted existing token for reconnection")
-                        except:
-                            pass
-            else:
-                output_lines.append("✗ credentials.json NOT FOUND")
-                output_lines.append("  Download OAuth credentials from Google Cloud Console")
+        env_vars['GOOGLE_DRIVE_FOLDER_ID'] = folder_id
         
         # Handle encryption key
+        encryption_key = None
         if encryption_key_method != "off":
+            # Check for existing key
             existing_key = os.environ.get('comfyui_encryption_key')
-            
-            if existing_key and not reconnect:
-                output_lines.append("✓ Encryption key already configured")
-                env_vars['comfyui_encryption_key'] = existing_key
+            if existing_key:
+                encryption_key = existing_key
+                results.append("Using existing encryption key from environment")
             else:
-                new_key = generate_key()
-                env_vars['comfyui_encryption_key'] = new_key
-                output_lines.append("✓ New encryption key generated")
+                # Generate new key
+                encryption_key = Fernet.generate_key().decode('utf-8')
+                results.append("Generated new encryption key")
+            
+            env_vars['comfyui_encryption_key'] = encryption_key
         
-        # Output based on storage method
-        if storage_method == "env_file" and env_vars:
-            env_path = NODE_DIR / '.env'
+        # === OAuth Setup ===
+        if auth_method == 'oauth':
+            if not client_id or not client_secret:
+                return (
+                    "❌ Error: OAuth requires client_id and client_secret.\n\n"
+                    "To get these:\n"
+                    "1. Go to Google Cloud Console → APIs & Services → Credentials\n"
+                    "2. Create OAuth 2.0 Client ID (Desktop app)\n"
+                    "3. Copy Client ID and Client Secret here",
+                )
             
-            # Load existing .env if present
-            existing_vars = {}
-            if env_path.exists():
-                with open(env_path, 'r') as f:
-                    for line in f:
-                        line = line.strip()
-                        if '=' in line and not line.startswith('#'):
-                            key, value = line.split('=', 1)
-                            existing_vars[key] = value
+            from .gdrive_auth_manager import get_oauth_credentials_for_setup
             
-            # Merge with new vars
-            existing_vars.update(env_vars)
+            if not auth_code:
+                # First run - generate auth URL
+                result = get_oauth_credentials_for_setup(client_id, client_secret)
+                
+                if 'auth_url' in result:
+                    auth_url = result['auth_url']
+                    
+                    # Try to open browser
+                    try:
+                        webbrowser.open(auth_url)
+                        browser_msg = "Browser opened!"
+                    except:
+                        browser_msg = "Could not open browser automatically."
+                    
+                    print("\n" + "="*60)
+                    print("[DriveSend Setup] OAuth Authorization Required")
+                    print("="*60)
+                    print(f"\n{browser_msg}\n")
+                    print("If browser didn't open, visit this URL:")
+                    print(f"\n{auth_url}\n")
+                    print("After authorizing, copy the code and paste it in the")
+                    print("'auth_code' field, then run this node again.")
+                    print("="*60 + "\n")
+                    
+                    return (
+                        f"🔐 OAuth Step 1: Authorization Required\n\n"
+                        f"{browser_msg}\n\n"
+                        f"1. Sign in to Google and authorize the app\n"
+                        f"2. Copy the authorization code\n"
+                        f"3. Paste it in the 'auth_code' field\n"
+                        f"4. Run this node again",
+                    )
+                else:
+                    return (f"❌ Error generating auth URL: {result.get('error', 'Unknown error')}",)
             
-            # Write .env file
-            with open(env_path, 'w') as f:
-                for key, value in existing_vars.items():
-                    f.write(f"{key}={value}\n")
-            
-            output_lines.append(f"\n✓ Credentials saved to: {env_path}")
+            else:
+                # Second run - exchange code for tokens
+                result = get_oauth_credentials_for_setup(client_id, client_secret, auth_code)
+                
+                if 'error' in result:
+                    return (f"❌ Error: {result['error']}\n\nTry generating a new auth code.",)
+                
+                if 'credentials' in result:
+                    creds = result['credentials']
+                    
+                    env_vars['GOOGLE_CLIENT_ID'] = creds['client_id']
+                    env_vars['GOOGLE_CLIENT_SECRET'] = creds['client_secret']
+                    env_vars['GOOGLE_REFRESH_TOKEN'] = creds['refresh_token']
+                    
+                    results.append("✓ OAuth authorization successful!")
+                    results.append(f"✓ Refresh token obtained")
         
-        elif storage_method == "display_only":
-            output_lines.append("")
-            output_lines.append("="*50)
-            output_lines.append("COPY THESE TO RUNPOD SECRETS / ENV VARIABLES:")
-            output_lines.append("="*50)
+        # === Service Account Setup ===
+        elif auth_method == 'service_account':
+            sa_file = NODE_DIR / 'service_account.json'
             
-            # Print to console for copying
-            print("\n" + "="*60)
-            print("COPY THESE VALUES TO YOUR ENVIRONMENT VARIABLES:")
-            print("="*60)
+            if not sa_file.exists():
+                return (
+                    "❌ Error: service_account.json not found.\n\n"
+                    "To create one:\n"
+                    "1. Go to Google Cloud Console → IAM & Admin → Service Accounts\n"
+                    "2. Create a service account\n"
+                    "3. Create a JSON key\n"
+                    "4. Rename to 'service_account.json'\n"
+                    "5. Place in: ComfyUI/custom_nodes/ComfyUI_DriveSendNode/\n\n"
+                    "⚠️ NOTE: Service accounts only work with Google Workspace (paid).\n"
+                    "For personal Gmail accounts, use OAuth instead.",
+                )
             
-            for key, value in env_vars.items():
-                print(f"\n{key}={value}")
-            
-            print("\n" + "="*60)
-            print("See console output above for full values to copy")
-            print("="*60)
+            # Read and encode service account JSON
+            try:
+                with open(sa_file, 'r') as f:
+                    sa_data = json.load(f)
+                
+                sa_email = sa_data.get('client_email', 'unknown')
+                sa_json_b64 = base64.b64encode(json.dumps(sa_data).encode()).decode()
+                
+                env_vars['GOOGLE_SERVICE_ACCOUNT_JSON'] = sa_json_b64
+                
+                results.append("✓ Service account loaded")
+                results.append(f"✓ Service account email: {sa_email}")
+                results.append("")
+                results.append("⚠️ IMPORTANT: Share your Google Drive folder with:")
+                results.append(f"   {sa_email}")
+                results.append("")
+                results.append("⚠️ NOTE: Service accounts require Google Workspace.")
+                results.append("   They do NOT work with personal Gmail accounts!")
+                
+            except Exception as e:
+                return (f"❌ Error reading service_account.json: {e}",)
         
-        # Print summary
+        # === Output Results ===
         print("\n" + "="*60)
-        print("[DriveSend Setup] Configuration complete!")
+        print("[DriveSend Setup] Configuration Complete!")
+        print("="*60)
+        print("\nCopy these values to your Environment Variables:\n")
+        
+        for key, value in env_vars.items():
+            # Truncate long values for display
+            display_value = value if len(value) < 50 else value[:47] + "..."
+            print(f"{key}={display_value}")
+        
+        print("\n" + "="*60)
+        print("See console output above for full values to copy")
         print("="*60 + "\n")
         
-        status = "\n".join(output_lines)
-        return (status,)
+        # Save to .env file if requested
+        if storage_method == 'env_file':
+            env_file = NODE_DIR / '.env'
+            try:
+                with open(env_file, 'w') as f:
+                    for key, value in env_vars.items():
+                        f.write(f"{key}={value}\n")
+                results.append(f"✓ Saved to {env_file}")
+            except Exception as e:
+                results.append(f"⚠️ Could not save .env file: {e}")
+        
+        # Build status message
+        status_lines = [
+            "✅ DriveSend Setup Complete!",
+            "",
+            f"Auth Method: {auth_method}",
+            f"Folder ID: {folder_id}",
+            f"Encryption: {'Enabled' if encryption_key else 'Disabled'}",
+            "",
+        ]
+        status_lines.extend(results)
+        status_lines.extend([
+            "",
+            "Check the console/terminal for credentials to copy.",
+        ])
+        
+        if storage_method == 'display_only':
+            status_lines.extend([
+                "",
+                "For RunPod: Copy the values from console to RunPod Secrets.",
+            ])
+        
+        return ("\n".join(status_lines),)
 
 
 # Node registration
 NODE_CLASS_MAPPINGS = {
-    "DriveSendSetupNode": DriveSendSetupNode
+    "DriveSendSetup": DriveSendSetupNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "DriveSendSetupNode": "DriveSend Setup"
+    "DriveSendSetup": "DriveSend Setup"
 }

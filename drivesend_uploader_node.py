@@ -1,6 +1,6 @@
 """
 DriveSend AutoUploader Node
-Monitors ComfyUI output directory and uploads files to Google Drive
+Monitors output folder and uploads new files to Google Drive
 """
 
 import os
@@ -9,147 +9,176 @@ from pathlib import Path
 from .monitor_output import start_monitor, stop_monitor, get_monitor
 
 
-# Default output directory
-DEFAULT_OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
-
-
 class DriveSendAutoUploaderNode:
-    """
-    ComfyUI node for automatic Google Drive uploads with optional encryption.
-    """
+    """ComfyUI node for automatic Google Drive uploads."""
+    
+    CATEGORY = "DriveSend"
+    FUNCTION = "run"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("status",)
+    OUTPUT_NODE = True
     
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "watch_directory": ("STRING", {
-                    "default": str(DEFAULT_OUTPUT_DIR),
-                    "multiline": False,
-                    "placeholder": "Directory to monitor for new files"
-                }),
-                "auth_method": (["service_account", "oauth"],),
+                "auth_method": (["oauth", "service_account"], {"default": "oauth"}),
                 "run_process": ("BOOLEAN", {"default": True}),
+                "enable_encryption": ("BOOLEAN", {"default": False}),
+                "Subfolder_Monitor": ("BOOLEAN", {"default": True}),
+                "Post_Delete_Enc": ("BOOLEAN", {"default": False}),
             },
             "optional": {
+                "watch_folder": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "tooltip": "Folder to monitor (leave blank for ComfyUI output folder)"
+                }),
                 "folder_id": ("STRING", {
                     "default": "",
                     "multiline": False,
-                    "placeholder": "Google Drive Folder ID (uses env var if blank)"
+                    "tooltip": "Google Drive folder ID (uses env var if blank)"
                 }),
-                "owner_email": ("STRING", {
-                    "default": "",
-                    "multiline": False,
-                    "placeholder": "Your Gmail address (required for service account)"
-                }),
-                "enable_encryption": ("BOOLEAN", {"default": False}),
-                "Post_Delete_Enc": ("BOOLEAN", {"default": False}),
-                "Subfolder_Monitor": ("BOOLEAN", {"default": True}),
-                "any_input": ("*", {}),  # Passthrough for workflow chaining
             }
         }
     
-    RETURN_TYPES = ("STRING", "*")
-    RETURN_NAMES = ("status", "passthrough")
-    FUNCTION = "run"
-    CATEGORY = "DriveSend"
-    
-    def run(
-        self,
-        watch_directory,
-        auth_method,
-        run_process,
-        folder_id="",
-        owner_email="",
-        enable_encryption=False,
-        Post_Delete_Enc=False,
-        Subfolder_Monitor=True,
-        any_input=None
-    ):
-        status_lines = []
+    def run(self, auth_method, run_process, enable_encryption, Subfolder_Monitor, 
+            Post_Delete_Enc, watch_folder="", folder_id=""):
+        """
+        Start or stop the Google Drive upload monitor.
         
-        # Get current monitor state
-        current_monitor = get_monitor()
+        Args:
+            auth_method: 'oauth' or 'service_account'
+            run_process: True to start, False to stop
+            enable_encryption: Encrypt files before upload
+            Subfolder_Monitor: Monitor subfolders recursively
+            Post_Delete_Enc: Delete .enc files after upload
+            watch_folder: Folder to monitor (default: ComfyUI output)
+            folder_id: Google Drive folder ID (default: from env var)
+        """
         
-        if run_process:
-            # Start or restart monitor
-            if current_monitor and current_monitor.is_running():
+        # Stop if requested
+        if not run_process:
+            monitor = get_monitor()
+            if monitor and monitor.is_running():
                 stop_monitor()
-                status_lines.append("Stopped existing monitor")
-            
-            # Validate watch directory
-            watch_path = Path(watch_directory)
-            if not watch_path.exists():
-                try:
-                    watch_path.mkdir(parents=True, exist_ok=True)
-                    status_lines.append(f"Created watch directory: {watch_path}")
-                except Exception as e:
-                    status_lines.append(f"Error: Could not create watch directory: {e}")
-                    return ("\n".join(status_lines), any_input)
-            
-            # Get owner email from field or environment
-            effective_owner_email = owner_email if owner_email else os.environ.get('GOOGLE_OWNER_EMAIL', '')
-            
-            # Warn if using service account without owner email
-            if auth_method == 'service_account' and not effective_owner_email:
-                status_lines.append("⚠ WARNING: No owner_email set!")
-                status_lines.append("  Service accounts have 0 GB storage quota.")
-                status_lines.append("  Set owner_email to your Gmail or set GOOGLE_OWNER_EMAIL env var.")
-                status_lines.append("")
-            
-            # Set owner email in environment for upload module
-            if effective_owner_email:
-                os.environ['GOOGLE_OWNER_EMAIL'] = effective_owner_email
-            
-            # Start monitor
-            try:
-                monitor = start_monitor(
-                    watch_dir=str(watch_path),
-                    folder_id=folder_id if folder_id else None,
-                    recursive=Subfolder_Monitor,
-                    enable_encryption=enable_encryption,
-                    post_delete_enc=Post_Delete_Enc,
-                    auth_method=auth_method,
-                    owner_email=effective_owner_email
-                )
-                
-                status_lines.append(f"✓ Monitor started")
-                status_lines.append(f"  Directory: {watch_path}")
-                status_lines.append(f"  Auth: {auth_method}")
-                status_lines.append(f"  Recursive: {Subfolder_Monitor}")
-                status_lines.append(f"  Encryption: {enable_encryption}")
-                
-                if effective_owner_email:
-                    status_lines.append(f"  Owner Email: {effective_owner_email}")
-                
-                if folder_id:
-                    status_lines.append(f"  Folder ID: {folder_id}")
-                else:
-                    env_folder = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
-                    if env_folder:
-                        status_lines.append(f"  Folder ID: {env_folder} (from env)")
-                    else:
-                        status_lines.append("  Folder ID: Root (no folder specified)")
-            
-            except Exception as e:
-                status_lines.append(f"Error starting monitor: {e}")
-        
-        else:
-            # Stop monitor
-            if current_monitor and current_monitor.is_running():
-                stop_monitor()
-                status_lines.append("✓ Monitor stopped")
+                return ("⏹️ DriveSend monitor stopped.",)
             else:
-                status_lines.append("Monitor not running")
+                return ("ℹ️ Monitor was not running.",)
         
-        status = "\n".join(status_lines)
-        return (status, any_input)
+        # Determine watch folder
+        if watch_folder:
+            watch_path = Path(watch_folder)
+        else:
+            # Default to ComfyUI output folder
+            # Try common locations
+            possible_paths = [
+                Path("/workspace/ComfyUI/output"),  # RunPod
+                Path("./output"),  # Relative
+                Path(__file__).parent.parent.parent / "output",  # Relative to node
+            ]
+            
+            watch_path = None
+            for p in possible_paths:
+                if p.exists():
+                    watch_path = p
+                    break
+            
+            if not watch_path:
+                return ("❌ Error: Could not find ComfyUI output folder. Please specify watch_folder.",)
+        
+        if not watch_path.exists():
+            return (f"❌ Error: Watch folder does not exist: {watch_path}",)
+        
+        # Get folder ID from parameter or environment
+        effective_folder_id = folder_id or os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
+        if not effective_folder_id:
+            return (
+                "❌ Error: No folder_id provided.\n\n"
+                "Either:\n"
+                "1. Set the folder_id parameter in this node\n"
+                "2. Set GOOGLE_DRIVE_FOLDER_ID environment variable\n"
+                "3. Run the DriveSend Setup node first",
+            )
+        
+        # Check for encryption key if encryption is enabled
+        if enable_encryption:
+            enc_key = os.environ.get('comfyui_encryption_key')
+            if not enc_key:
+                return (
+                    "❌ Error: Encryption enabled but no key found.\n\n"
+                    "Set comfyui_encryption_key environment variable\n"
+                    "or run DriveSend Setup with encryption enabled.",
+                )
+        
+        # Validate auth method requirements
+        if auth_method == 'oauth':
+            client_id = os.environ.get('GOOGLE_CLIENT_ID')
+            client_secret = os.environ.get('GOOGLE_CLIENT_SECRET')
+            refresh_token = os.environ.get('GOOGLE_REFRESH_TOKEN')
+            
+            if not all([client_id, client_secret, refresh_token]):
+                # Check for token.json file as fallback
+                token_file = Path(__file__).parent / 'token.json'
+                if not token_file.exists():
+                    return (
+                        "❌ Error: OAuth credentials not found.\n\n"
+                        "Set these environment variables:\n"
+                        "- GOOGLE_CLIENT_ID\n"
+                        "- GOOGLE_CLIENT_SECRET\n"
+                        "- GOOGLE_REFRESH_TOKEN\n\n"
+                        "Or run DriveSend Setup to authorize.",
+                    )
+        
+        elif auth_method == 'service_account':
+            sa_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
+            sa_file = Path(__file__).parent / 'service_account.json'
+            
+            if not sa_json and not sa_file.exists():
+                return (
+                    "❌ Error: Service account credentials not found.\n\n"
+                    "Either:\n"
+                    "1. Set GOOGLE_SERVICE_ACCOUNT_JSON environment variable (base64)\n"
+                    "2. Place service_account.json in the node folder\n\n"
+                    "⚠️ NOTE: Service accounts only work with Google Workspace (paid).\n"
+                    "For personal Gmail, use OAuth instead.",
+                )
+        
+        # Start the monitor
+        try:
+            monitor = start_monitor(
+                watch_dir=str(watch_path),
+                folder_id=effective_folder_id,
+                recursive=Subfolder_Monitor,
+                enable_encryption=enable_encryption,
+                post_delete_enc=Post_Delete_Enc,
+                auth_method=auth_method
+            )
+            
+            status_lines = [
+                "✅ DriveSend monitor started!",
+                "",
+                f"📁 Watching: {watch_path}",
+                f"☁️ Uploading to: Google Drive folder {effective_folder_id[:20]}...",
+                f"🔐 Auth method: {auth_method}",
+                f"🔒 Encryption: {'Enabled' if enable_encryption else 'Disabled'}",
+                f"📂 Subfolder monitoring: {'Enabled' if Subfolder_Monitor else 'Disabled'}",
+                "",
+                "New files will be uploaded automatically.",
+                "Set run_process to False to stop.",
+            ]
+            
+            return ("\n".join(status_lines),)
+            
+        except Exception as e:
+            return (f"❌ Error starting monitor: {e}",)
 
 
 # Node registration
 NODE_CLASS_MAPPINGS = {
-    "DriveSendAutoUploaderNode": DriveSendAutoUploaderNode
+    "DriveSendAutoUploader": DriveSendAutoUploaderNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "DriveSendAutoUploaderNode": "DriveSend AutoUploader"
+    "DriveSendAutoUploader": "DriveSend AutoUploader"
 }

@@ -1,6 +1,6 @@
 """
 Google Drive Upload Module
-Handles file uploads to Google Drive with integrity verification and ownership transfer
+Handles file uploads to Google Drive with integrity verification
 """
 
 import os
@@ -42,52 +42,7 @@ def calculate_sha256(file_path):
     return sha256_hash.hexdigest()
 
 
-def transfer_ownership(service, file_id, owner_email):
-    """
-    Transfer file ownership to a personal Google account.
-    
-    This is required because service accounts have 0 GB storage quota.
-    By transferring ownership, the file counts against the personal account's quota.
-    
-    Args:
-        service: Google Drive API service object
-        file_id: ID of the uploaded file
-        owner_email: Email address to transfer ownership to
-    
-    Returns:
-        bool: True if transfer successful, False otherwise
-    """
-    if not owner_email:
-        return False
-    
-    try:
-        # Create permission with ownership transfer
-        permission = {
-            'type': 'user',
-            'role': 'owner',
-            'emailAddress': owner_email
-        }
-        
-        service.permissions().create(
-            fileId=file_id,
-            body=permission,
-            transferOwnership=True,
-            supportsAllDrives=True
-        ).execute()
-        
-        print(f"[DriveSend] ✓ Ownership transferred to: {owner_email}")
-        return True
-    
-    except HttpError as e:
-        print(f"[DriveSend] ⚠ Could not transfer ownership: {e}")
-        return False
-    except Exception as e:
-        print(f"[DriveSend] ⚠ Ownership transfer error: {e}")
-        return False
-
-
-def upload_file(file_path, folder_id=None, service=None, auth_method='service_account', 
-                owner_email=None, **auth_kwargs):
+def upload_file(file_path, folder_id=None, service=None, auth_method='oauth', **kwargs):
     """
     Upload a file to Google Drive.
     
@@ -95,9 +50,8 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
         file_path: Path to the file to upload
         folder_id: Google Drive folder ID (optional, uses env var or root if not provided)
         service: Existing Drive service object (optional)
-        auth_method: Authentication method ('service_account' or 'oauth')
-        owner_email: Email to transfer ownership to (required for service account uploads)
-        **auth_kwargs: Additional auth arguments
+        auth_method: Authentication method ('oauth' or 'service_account')
+        **kwargs: Additional arguments (for compatibility)
     
     Returns:
         dict with upload result including file ID and verification status
@@ -110,17 +64,13 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
     # Get or create service
     if service is None:
         try:
-            service = get_drive_service(auth_method, **auth_kwargs)
+            service = get_drive_service(auth_method)
         except Exception as e:
             return {'success': False, 'error': f'Authentication failed: {e}'}
     
     # Get folder ID
     if folder_id is None:
         folder_id = get_folder_id()
-    
-    # Get owner email from parameter or environment
-    if owner_email is None:
-        owner_email = os.environ.get('GOOGLE_OWNER_EMAIL')
     
     # Calculate local hash for verification
     local_hash = calculate_sha256(file_path)
@@ -157,18 +107,6 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
         remote_size = int(file.get('size', 0))
         local_size = file_path.stat().st_size
         
-        # Transfer ownership if using service account
-        ownership_transferred = False
-        if auth_method == 'service_account' and owner_email:
-            ownership_transferred = transfer_ownership(service, file_id, owner_email)
-            if not ownership_transferred:
-                print(f"[DriveSend] ⚠ Warning: File uploaded but ownership not transferred.")
-                print(f"[DriveSend]   The file may not persist if service account quota is exceeded.")
-                print(f"[DriveSend]   Make sure GOOGLE_OWNER_EMAIL is set to your personal Gmail.")
-        elif auth_method == 'service_account' and not owner_email:
-            print(f"[DriveSend] ⚠ Warning: No owner_email set. Service accounts have 0 GB quota.")
-            print(f"[DriveSend]   Set GOOGLE_OWNER_EMAIL environment variable to your Gmail address.")
-        
         # Verify upload
         size_match = remote_size == local_size
         
@@ -180,8 +118,7 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
                 'file_name': file.get('name'),
                 'size': remote_size,
                 'local_hash': local_hash,
-                'verified': True,
-                'ownership_transferred': ownership_transferred
+                'verified': True
             }
         else:
             print(f"[DriveSend] ⚠ Upload size mismatch: local={local_size}, remote={remote_size}")
@@ -192,14 +129,25 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
                 'size': remote_size,
                 'local_hash': local_hash,
                 'verified': False,
-                'warning': 'Size mismatch - file may be corrupted',
-                'ownership_transferred': ownership_transferred
+                'warning': 'Size mismatch - file may be corrupted'
             }
     
     except HttpError as e:
-        error_msg = f'Google Drive API error: {e}'
-        print(f"[DriveSend] ✗ {error_msg}")
-        return {'success': False, 'error': error_msg}
+        error_msg = str(e)
+        
+        # Provide helpful error messages
+        if 'storageQuotaExceeded' in error_msg:
+            print(f"[DriveSend] ✗ Storage quota exceeded!")
+            print(f"[DriveSend]   If using service account with personal Gmail, this won't work.")
+            print(f"[DriveSend]   Service accounts require Google Workspace (paid).")
+            print(f"[DriveSend]   For personal Gmail, use OAuth authentication instead.")
+            return {
+                'success': False, 
+                'error': 'Storage quota exceeded. Service accounts do not work with personal Gmail. Use OAuth instead.'
+            }
+        
+        print(f"[DriveSend] ✗ Google Drive API error: {error_msg}")
+        return {'success': False, 'error': f'Google Drive API error: {error_msg}'}
     
     except Exception as e:
         error_msg = f'Upload failed: {e}'
@@ -207,7 +155,7 @@ def upload_file(file_path, folder_id=None, service=None, auth_method='service_ac
         return {'success': False, 'error': error_msg}
 
 
-def create_folder(folder_name, parent_folder_id=None, service=None, auth_method='service_account', **auth_kwargs):
+def create_folder(folder_name, parent_folder_id=None, service=None, auth_method='oauth'):
     """
     Create a folder in Google Drive.
     
@@ -216,14 +164,13 @@ def create_folder(folder_name, parent_folder_id=None, service=None, auth_method=
         parent_folder_id: Parent folder ID (optional)
         service: Existing Drive service object (optional)
         auth_method: Authentication method
-        **auth_kwargs: Additional auth arguments
     
     Returns:
         dict with folder creation result including folder ID
     """
     if service is None:
         try:
-            service = get_drive_service(auth_method, **auth_kwargs)
+            service = get_drive_service(auth_method)
         except Exception as e:
             return {'success': False, 'error': f'Authentication failed: {e}'}
     
@@ -253,46 +200,45 @@ def create_folder(folder_name, parent_folder_id=None, service=None, auth_method=
         return {'success': False, 'error': f'Failed to create folder: {e}'}
 
 
-def find_folder(folder_name, parent_folder_id=None, service=None, auth_method='service_account', **auth_kwargs):
+def list_files(folder_id=None, service=None, auth_method='oauth', max_results=100):
     """
-    Find a folder by name in Google Drive.
+    List files in a Google Drive folder.
     
     Args:
-        folder_name: Name of the folder to find
-        parent_folder_id: Parent folder ID to search in (optional)
+        folder_id: Folder ID to list (optional, lists root if not provided)
         service: Existing Drive service object (optional)
         auth_method: Authentication method
-        **auth_kwargs: Additional auth arguments
+        max_results: Maximum number of files to return
     
     Returns:
-        Folder ID if found, None otherwise
+        dict with list of files or error
     """
     if service is None:
         try:
-            service = get_drive_service(auth_method, **auth_kwargs)
+            service = get_drive_service(auth_method)
         except Exception as e:
-            print(f"[DriveSend] Authentication failed: {e}")
-            return None
+            return {'success': False, 'error': f'Authentication failed: {e}'}
     
-    query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    if folder_id is None:
+        folder_id = get_folder_id()
     
-    if parent_folder_id:
-        query += f" and '{parent_folder_id}' in parents"
+    query = f"'{folder_id}' in parents and trashed=false" if folder_id else "trashed=false"
     
     try:
         results = service.files().list(
             q=query,
-            fields='files(id, name)',
-            pageSize=1,
+            fields='files(id, name, size, mimeType, createdTime)',
+            pageSize=max_results,
             supportsAllDrives=True,
             includeItemsFromAllDrives=True
         ).execute()
         
         files = results.get('files', [])
-        if files:
-            return files[0].get('id')
-        return None
+        return {
+            'success': True,
+            'files': files,
+            'count': len(files)
+        }
     
     except HttpError as e:
-        print(f"[DriveSend] Error finding folder: {e}")
-        return None
+        return {'success': False, 'error': f'Failed to list files: {e}'}
