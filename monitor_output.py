@@ -1,45 +1,35 @@
-"""
-Output Monitor Module
-Watches a directory for new files and triggers uploads
-"""
+# monitor_output.py
+# DriveSend upload monitor - watches for files and uploads to Google Drive
 
 import os
 import time
 import threading
-import queue
 import logging
-from pathlib import Path
+from queue import Queue
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-
 from .gdrive_upload import upload_file
-from .encrypt_file import encrypt_file, get_encryption_key
+from .encrypt_file import ENCRYPT_EXTENSIONS
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('drivesend.log'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
 
-# Supported file extensions
-SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.avi', '.mov'}
-
-# Global stop signal for queue processor
-_stop_queue_processor = False
+watcher_observer = None
+watcher_handler = None
+encryption_enabled = False
+_stop_queue_processor = False  # Stop signal for queue processor
+_drive_service = None  # Cached Drive service
 
 
 def wait_for_complete_write(file_path, timeout=10):
-    """
-    Wait for a file to be completely written before processing.
-    Checks if file size is stable for 2 consecutive checks (1 second).
-    
-    Args:
-        file_path: Path to the file
-        timeout: Maximum time to wait in seconds
-    
-    Returns:
-        bool: True if file is ready, False if timeout
-    """
+    """Wait for a file to be completely written before processing."""
     last_size = -1
     stable_count = 0
     checks = 0
@@ -49,7 +39,7 @@ def wait_for_complete_write(file_path, timeout=10):
             current_size = os.path.getsize(file_path)
             if current_size == last_size:
                 stable_count += 1
-                if stable_count >= 2:  # File size stable for 2 checks (1 second)
+                if stable_count >= 2:
                     return True
             else:
                 stable_count = 0
@@ -59,239 +49,187 @@ def wait_for_complete_write(file_path, timeout=10):
         time.sleep(0.5)
         checks += 1
 
-    logger.warning(f"Timeout: File may still be writing: {file_path}")
+    logger.warning(f"[DriveSend] Timeout: File may still be writing: {file_path}")
     return False
 
 
-class UploadHandler(FileSystemEventHandler):
-    """Handles file system events and queues files for upload."""
+def stop_queue_processor():
+    """Signal the queue processor to stop."""
+    global _stop_queue_processor
+    _stop_queue_processor = True
+    logger.info("[DriveSend] Signaled upload queue processor to stop")
+
+
+def reset_queue_processor():
+    """Reset the stop signal for queue processor."""
+    global _stop_queue_processor
+    _stop_queue_processor = False
+
+
+class NewFileHandler(FileSystemEventHandler):
+    """
+    Handles new file events and queues them for upload.
+    When encryption is enabled, only uploads .enc files.
+    When encryption is disabled, uploads image/video files directly.
+    """
     
-    def __init__(self, upload_queue, recursive=True, enable_encryption=False):
+    def __init__(self, folder_id, auth_method='oauth', delete_enc=False):
         super().__init__()
-        self.upload_queue = upload_queue
-        self.recursive = recursive
-        self.enable_encryption = enable_encryption
-        self.processed_files = set()
-    
+        self.folder_id = folder_id
+        self.auth_method = auth_method
+        self.delete_enc = delete_enc
+        self.file_queue = Queue()
+        self.start_queue_processor()
+
     def on_created(self, event):
         if event.is_directory:
             return
+        file_path = event.src_path
         
-        file_path = Path(event.src_path)
-        
-        # Handle encryption mode file filtering
-        if self.enable_encryption:
-            # When encryption is enabled, only process .enc files
-            if file_path.suffix.lower() != '.enc':
-                return
-        else:
-            # When encryption is disabled, skip .enc files and check supported extensions
-            if file_path.suffix.lower() == '.enc':
-                return
-            if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-                return
-        
-        # Avoid processing the same file multiple times
-        if str(file_path) in self.processed_files:
+        # When encryption is enabled, only process .enc files
+        if encryption_enabled and not file_path.lower().endswith('.enc'):
+            logger.debug(f"[DriveSend] Skipping non-.enc file (encryption enabled): {file_path}")
             return
         
-        self.processed_files.add(str(file_path))
+        # When encryption is disabled, skip .enc files and only process supported extensions
+        if not encryption_enabled:
+            if file_path.lower().endswith('.enc'):
+                logger.debug(f"[DriveSend] Skipping .enc file (encryption disabled): {file_path}")
+                return
+            if not file_path.lower().endswith(ENCRYPT_EXTENSIONS):
+                logger.debug(f"[DriveSend] Skipping unsupported file type: {file_path}")
+                return
         
-        # Add to queue (wait_for_complete_write happens in worker)
-        self.upload_queue.put(str(file_path))
-        print(f"[DriveSend] Queued: {file_path.name}")
+        logger.info(f"[DriveSend] Detected new file: {file_path}")
+        self.file_queue.put(file_path)
 
-
-class OutputMonitor:
-    """Monitors a directory and uploads new files to Google Drive."""
-    
-    def __init__(
-        self,
-        watch_dir,
-        folder_id=None,
-        recursive=True,
-        enable_encryption=False,
-        post_delete_enc=False,
-        auth_method='service_account',
-        owner_email=None,
-        **auth_kwargs
-    ):
-        self.watch_dir = Path(watch_dir)
-        self.folder_id = folder_id or os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
-        self.recursive = recursive
-        self.enable_encryption = enable_encryption
-        self.post_delete_enc = post_delete_enc
-        self.auth_method = auth_method
-        self.owner_email = owner_email or os.environ.get('GOOGLE_OWNER_EMAIL')
-        self.auth_kwargs = auth_kwargs
-        
-        self.upload_queue = queue.Queue()
-        self.observer = None
-        self.upload_thread = None
-        self.running = False
-        self.service = None
-    
-    def _upload_worker(self):
-        """Worker thread that processes the upload queue."""
-        global _stop_queue_processor
-        from .gdrive_auth_manager import get_drive_service
-        
-        # Get authenticated service
-        try:
-            self.service = get_drive_service(self.auth_method, **self.auth_kwargs)
-        except Exception as e:
-            print(f"[DriveSend] Failed to authenticate: {e}")
-            return
-        
-        while self.running and not _stop_queue_processor:
-            try:
-                # Get file from queue with timeout
-                file_path = self.upload_queue.get(timeout=1)
-            except queue.Empty:
-                continue
+    def start_queue_processor(self):
+        def process_queue():
+            global _drive_service
             
-            # Wait for file to be completely written
-            if not wait_for_complete_write(file_path):
-                print(f"[DriveSend] Warning: File may be incomplete: {file_path}")
-                # Still try to upload, but warn
+            # Initialize Drive service once
+            if _drive_service is None:
+                try:
+                    from .gdrive_auth_manager import get_drive_service
+                    _drive_service = get_drive_service(self.auth_method)
+                    logger.info("[DriveSend] Drive service initialized")
+                except Exception as e:
+                    logger.error(f"[DriveSend] Failed to initialize Drive service: {e}")
+                    return
             
-            try:
-                file_to_upload = file_path
-                encrypted_file = None
-                
-                # Encrypt if enabled (and file is not already .enc)
-                if self.enable_encryption and not file_path.lower().endswith('.enc'):
-                    key = get_encryption_key()
-                    if key:
-                        result = encrypt_file(file_path, key=key)
-                        if result['success']:
-                            file_to_upload = result['output_path']
-                            encrypted_file = file_to_upload
-                            print(f"[DriveSend] Encrypted: {Path(file_path).name} -> {Path(file_to_upload).name}")
-                        else:
-                            print(f"[DriveSend] Encryption failed: {result.get('error')}")
-                    else:
-                        print("[DriveSend] Warning: Encryption enabled but no key found")
-                
-                # Upload file with owner_email for ownership transfer
-                result = upload_file(
-                    file_to_upload,
-                    folder_id=self.folder_id,
-                    service=self.service,
-                    auth_method=self.auth_method,
-                    owner_email=self.owner_email
-                )
-                
-                if result['success']:
-                    print(f"[DriveSend] ✓ Uploaded: {Path(file_to_upload).name}")
-                    
-                    # Clean up encrypted file if requested
-                    if encrypted_file and self.post_delete_enc:
+            while not _stop_queue_processor:
+                if not self.file_queue.empty():
+                    file_path = self.file_queue.get()
+                    if wait_for_complete_write(file_path):
                         try:
-                            os.remove(encrypted_file)
-                            print(f"[DriveSend] Deleted encrypted file: {Path(encrypted_file).name}")
+                            result = upload_file(
+                                file_path,
+                                folder_id=self.folder_id,
+                                service=_drive_service
+                            )
+                            if result.get('success'):
+                                logger.info(f"[DriveSend] ✓ Uploaded: {os.path.basename(file_path)}")
+                                # Delete .enc file after successful upload if requested
+                                if self.delete_enc and file_path.lower().endswith('.enc'):
+                                    os.remove(file_path)
+                                    logger.info(f"[DriveSend] Deleted .enc file after upload: {file_path}")
+                            else:
+                                logger.error(f"[DriveSend] Upload failed: {result.get('error')}")
+                                self.file_queue.put(file_path)  # Requeue on failure
                         except Exception as e:
-                            print(f"[DriveSend] Failed to delete encrypted file: {e}")
-                else:
-                    print(f"[DriveSend] ✗ Upload failed: {result.get('error')}")
-                    # Requeue on failure
-                    self.upload_queue.put(file_path)
-            
-            except Exception as e:
-                print(f"[DriveSend] Error processing {file_path}: {e}")
-                # Requeue on failure
-                self.upload_queue.put(file_path)
-            
-            finally:
-                self.upload_queue.task_done()
+                            logger.error(f"[DriveSend] Upload failed: {e}")
+                            self.file_queue.put(file_path)  # Requeue on failure
+                time.sleep(0.1)  # Small delay to avoid CPU overload
+            logger.info("[DriveSend] Upload queue processor stopped")
+
+        threading.Thread(target=process_queue, daemon=True).start()
+
+
+def start_monitoring(watch_folder, folder_id, auth_method='oauth', enable_encryption=False, 
+                     delete_enc=False, subfolder_monitor=True):
+    """
+    Start monitoring a folder for new files to upload.
     
-    def start(self):
-        """Start monitoring the directory."""
-        global _stop_queue_processor
-        
-        if self.running:
-            print("[DriveSend] Monitor already running")
-            return
-        
-        if not self.watch_dir.exists():
-            print(f"[DriveSend] Watch directory does not exist: {self.watch_dir}")
-            return
-        
-        self.running = True
-        _stop_queue_processor = False  # Reset stop signal
-        
-        # Start upload worker thread
-        self.upload_thread = threading.Thread(target=self._upload_worker, daemon=True)
-        self.upload_thread.start()
-        
-        # Set up file system observer
-        handler = UploadHandler(self.upload_queue, self.recursive, self.enable_encryption)
-        self.observer = Observer()
-        self.observer.schedule(handler, str(self.watch_dir), recursive=self.recursive)
-        self.observer.start()
-        
-        print(f"[DriveSend] Started monitoring: {self.watch_dir}")
-        if self.recursive:
-            print("[DriveSend] Recursive monitoring enabled")
-        if self.enable_encryption:
-            print("[DriveSend] Encryption enabled")
-        if self.owner_email:
-            print(f"[DriveSend] Ownership will transfer to: {self.owner_email}")
-        elif self.auth_method == 'service_account':
-            print("[DriveSend] WARNING: No owner_email set - uploads may fail due to quota!")
+    Args:
+        watch_folder: Directory to monitor
+        folder_id: Google Drive folder ID
+        auth_method: 'oauth' or 'service_account'
+        enable_encryption: If True, only upload .enc files (created by separate encrypt watcher)
+        delete_enc: Delete .enc files after successful upload
+        subfolder_monitor: Monitor subfolders recursively
+    """
+    global watcher_observer, watcher_handler, encryption_enabled, _stop_queue_processor, _drive_service
     
-    def stop(self):
-        """Stop monitoring the directory."""
-        global _stop_queue_processor
-        
-        if not self.running:
-            return
-        
-        self.running = False
-        _stop_queue_processor = True  # Signal queue processor to stop
-        
-        if self.observer:
-            self.observer.stop()
-            self.observer.join(timeout=5)
-            self.observer = None
-        
-        if self.upload_thread:
-            self.upload_thread.join(timeout=5)
-            self.upload_thread = None
-        
-        print("[DriveSend] Stopped monitoring")
+    encryption_enabled = enable_encryption
+    _stop_queue_processor = False  # Reset stop signal when starting
+    _drive_service = None  # Reset service to force re-auth
+
+    if watcher_observer and watcher_observer.is_alive():
+        logger.info("[DriveSend] Restarting monitor to update settings.")
+        watcher_observer.stop()
+        watcher_observer.join()
+
+    watcher_handler = NewFileHandler(folder_id, auth_method, delete_enc)
+    watcher_observer = Observer()
+    watcher_observer.schedule(watcher_handler, watch_folder, recursive=subfolder_monitor)
+    watcher_observer.start()
+
+    logger.info(f"[DriveSend] Now watching: {watch_folder} (Subfolder_Monitor: {'Yes' if subfolder_monitor else 'No'})")
+    logger.info(f"[DriveSend] Upload target: Google Drive folder {folder_id}")
+    logger.info(f"[DriveSend] Encryption mode: {'Yes - uploading .enc files only' if encryption_enabled else 'No - uploading images directly'}")
+
+    def keep_alive():
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            watcher_observer.stop()
+        watcher_observer.join()
+
+    threading.Thread(target=keep_alive, daemon=True).start()
+
+
+def stop_monitoring():
+    """Stop the upload monitor."""
+    global watcher_observer, _drive_service
     
-    def is_running(self):
-        """Check if the monitor is running."""
-        return self.running
+    stop_queue_processor()
+    
+    if watcher_observer and watcher_observer.is_alive():
+        watcher_observer.stop()
+        watcher_observer.join()
+        logger.info("[DriveSend] Upload monitor stopped")
+    
+    _drive_service = None  # Clear cached service
 
 
-# Global monitor instance
-_monitor = None
-
-
-def get_monitor():
-    """Get the global monitor instance."""
-    global _monitor
-    return _monitor
-
-
+# Legacy function names for compatibility
 def start_monitor(**kwargs):
-    """Start a new global monitor instance."""
-    global _monitor
+    """Alias for start_monitoring."""
+    # Map new param names to old function
+    watch_dir = kwargs.pop('watch_dir', kwargs.pop('watch_folder', None))
+    recursive = kwargs.pop('recursive', kwargs.pop('subfolder_monitor', True))
+    post_delete_enc = kwargs.pop('post_delete_enc', kwargs.pop('delete_enc', False))
     
-    if _monitor and _monitor.is_running():
-        _monitor.stop()
-    
-    _monitor = OutputMonitor(**kwargs)
-    _monitor.start()
-    return _monitor
+    return start_monitoring(
+        watch_folder=watch_dir,
+        subfolder_monitor=recursive,
+        delete_enc=post_delete_enc,
+        **kwargs
+    )
 
 
 def stop_monitor():
-    """Stop the global monitor instance."""
-    global _monitor
+    """Alias for stop_monitoring."""
+    return stop_monitoring()
+
+
+def get_monitor():
+    """Get the current watcher observer."""
+    global watcher_observer
     
-    if _monitor:
-        _monitor.stop()
-        _monitor = None
+    class MonitorWrapper:
+        def is_running(self):
+            return watcher_observer and watcher_observer.is_alive()
+    
+    return MonitorWrapper()

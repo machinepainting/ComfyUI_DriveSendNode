@@ -1,0 +1,14 @@
+[project]
+name = "comfyui-drivesend-node"
+description = "Automatically upload ComfyUI output files to Google Drive with optional encryption. Supports OAuth and service accounts, real-time monitoring, cloud setups (RunPod), and includes cross-platform decryption scripts."
+version = "1.0.0"
+license = { file = "LICENSE" }
+dependencies = ["requests", "python-dotenv", "watchdog", "cryptography", "google-auth", "google-auth-oauthlib", "google-api-python-client"]
+
+[project.urls]
+Repository = "https://github.com/machinepainting/ComfyUI_DriveSendNode"
+
+[tool.comfy]
+PublisherId = "machinepainting"
+DisplayName = "DriveSend Node"
+Icon = ""
