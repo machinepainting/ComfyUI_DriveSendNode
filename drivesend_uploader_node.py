@@ -96,11 +96,16 @@ class DriveSendAutoUploaderNode:
         
         # Check for encryption key if encryption is enabled
         if enable_encryption:
-            enc_key = os.environ.get('comfyui_encryption_key')
+            enc_key = (
+                os.environ.get('COMFYUI_ENCRYPTION_KEY') or
+                os.environ.get('comfyui_encryption_key') or
+                os.environ.get('DROPSEND_ENCRYPTION_KEY') or
+                os.environ.get('DRIVESEND_ENCRYPTION_KEY')
+            )
             if not enc_key:
                 return (
                     "❌ Error: Encryption enabled but no key found.\n\n"
-                    "Set comfyui_encryption_key environment variable\n"
+                    "Set COMFYUI_ENCRYPTION_KEY environment variable\n"
                     "or run DriveSend Setup with encryption enabled.",
                 )
         

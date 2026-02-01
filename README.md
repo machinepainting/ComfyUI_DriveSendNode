@@ -2,6 +2,7 @@
 
 A ComfyUI custom node for uploading output files to Google Drive with optional encryption. Automatically monitors your output folder and uploads images/videos to your Google Drive.
 
+> **Prefer DropBox?** Check out [DropSend Node](https://github.com/machinepainting/ComfyUI_DropSendNode)
 ---
 
 ## ⚠️ Important: Authentication Requirements
@@ -10,7 +11,7 @@ DriveSend supports two authentication methods, each with different requirements:
 
 | Method | Account Type | Cost | Token Expiry | Recommended For |
 |--------|-------------|------|--------------|-----------------|
-| **Service Account** | Google Workspace only | ~$7+/month | Never expires | Business/paid users |
+| **Service Account** | Google Workspace only | Paid Tier | Never expires | Business/paid users |
 | **OAuth 2.0** | Personal Gmail | Free | Auto-refreshes* | Personal/free users |
 
 **\* OAuth tokens auto-refresh on each pod startup, effectively working like permanent credentials.**

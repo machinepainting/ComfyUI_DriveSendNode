@@ -1,26 +1,34 @@
 """
-File Encryption Module
-Handles Fernet (AES-128) encryption for files
+File encryption module for DriveSend
+Uses Fernet (AES-128) symmetric encryption
 """
 
 import os
+import hashlib
 from pathlib import Path
 from cryptography.fernet import Fernet
-
-
-def generate_key():
-    """Generate a new Fernet encryption key."""
-    return Fernet.generate_key().decode('utf-8')
 
 
 def get_encryption_key():
     """
     Get the encryption key from environment variable.
+    Checks multiple possible key names for compatibility with DropSend.
+    
+    Key retrieval order:
+      - COMFYUI_ENCRYPTION_KEY (uppercase - preferred)
+      - comfyui_encryption_key (lowercase - DropSend compatibility)
+      - DROPSEND_ENCRYPTION_KEY
+      - DRIVESEND_ENCRYPTION_KEY
     
     Returns:
         str: The encryption key, or None if not set
     """
-    return os.environ.get('comfyui_encryption_key')
+    return (
+        os.environ.get('COMFYUI_ENCRYPTION_KEY') or
+        os.environ.get('comfyui_encryption_key') or
+        os.environ.get('DROPSEND_ENCRYPTION_KEY') or
+        os.environ.get('DRIVESEND_ENCRYPTION_KEY')
+    )
 
 
 def encrypt_file(input_path, output_path=None, key=None):
@@ -33,46 +41,66 @@ def encrypt_file(input_path, output_path=None, key=None):
         key: Encryption key (default: from environment variable)
     
     Returns:
-        dict with encryption result
+        dict with encryption result:
+            - success: bool
+            - encrypted_path: str (if successful)
+            - checksum: str (SHA256 of original file)
+            - error: str (if failed)
     """
-    input_path = Path(input_path)
-    
-    if not input_path.exists():
-        return {'success': False, 'error': f'File not found: {input_path}'}
-    
-    if key is None:
-        key = get_encryption_key()
-    
-    if not key:
-        return {'success': False, 'error': 'No encryption key provided'}
-    
-    if output_path is None:
-        output_path = input_path.with_suffix(input_path.suffix + '.enc')
-    else:
-        output_path = Path(output_path)
-    
     try:
-        fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        input_path = Path(input_path)
         
+        if not input_path.exists():
+            return {"success": False, "error": f"File not found: {input_path}"}
+        
+        # Get encryption key
+        if key is None:
+            key = get_encryption_key()
+        
+        if not key:
+            return {"success": False, "error": "No encryption key found. Set COMFYUI_ENCRYPTION_KEY environment variable."}
+        
+        # Ensure key is bytes
+        if isinstance(key, str):
+            key = key.encode()
+        
+        # Create Fernet cipher
+        try:
+            fernet = Fernet(key)
+        except Exception as e:
+            return {"success": False, "error": f"Invalid encryption key: {e}"}
+        
+        # Read file
         with open(input_path, 'rb') as f:
             data = f.read()
         
+        # Calculate checksum of original file
+        checksum = hashlib.sha256(data).hexdigest()
+        
+        # Encrypt
         encrypted_data = fernet.encrypt(data)
         
+        # Determine output path
+        if output_path is None:
+            output_path = Path(str(input_path) + '.enc')
+        else:
+            output_path = Path(output_path)
+        
+        # Write encrypted file
         with open(output_path, 'wb') as f:
             f.write(encrypted_data)
         
-        print(f"[DriveSend] Encrypted: {input_path.name} → {output_path.name}")
         return {
-            'success': True,
-            'input_path': str(input_path),
-            'output_path': str(output_path),
-            'original_size': len(data),
-            'encrypted_size': len(encrypted_data)
+            "success": True,
+            "encrypted_path": str(output_path),
+            "original_path": str(input_path),
+            "checksum": checksum,
+            "original_size": len(data),
+            "encrypted_size": len(encrypted_data)
         }
-    
+        
     except Exception as e:
-        return {'success': False, 'error': f'Encryption failed: {e}'}
+        return {"success": False, "error": str(e)}
 
 
 def decrypt_file(input_path, output_path=None, key=None):
@@ -85,47 +113,69 @@ def decrypt_file(input_path, output_path=None, key=None):
         key: Encryption key (default: from environment variable)
     
     Returns:
-        dict with decryption result
+        dict with decryption result:
+            - success: bool
+            - decrypted_path: str (if successful)
+            - checksum: str (SHA256 of decrypted file)
+            - error: str (if failed)
     """
-    input_path = Path(input_path)
-    
-    if not input_path.exists():
-        return {'success': False, 'error': f'File not found: {input_path}'}
-    
-    if key is None:
-        key = get_encryption_key()
-    
-    if not key:
-        return {'success': False, 'error': 'No encryption key provided'}
-    
-    if output_path is None:
-        # Remove .enc extension
-        if input_path.suffix == '.enc':
-            output_path = input_path.with_suffix('')
-        else:
-            output_path = input_path.with_suffix('.decrypted')
-    else:
-        output_path = Path(output_path)
-    
     try:
-        fernet = Fernet(key.encode() if isinstance(key, str) else key)
+        input_path = Path(input_path)
         
+        if not input_path.exists():
+            return {"success": False, "error": f"File not found: {input_path}"}
+        
+        # Get encryption key
+        if key is None:
+            key = get_encryption_key()
+        
+        if not key:
+            return {"success": False, "error": "No encryption key found. Set COMFYUI_ENCRYPTION_KEY environment variable."}
+        
+        # Ensure key is bytes
+        if isinstance(key, str):
+            key = key.encode()
+        
+        # Create Fernet cipher
+        try:
+            fernet = Fernet(key)
+        except Exception as e:
+            return {"success": False, "error": f"Invalid encryption key: {e}"}
+        
+        # Read encrypted file
         with open(input_path, 'rb') as f:
             encrypted_data = f.read()
         
-        decrypted_data = fernet.decrypt(encrypted_data)
+        # Decrypt
+        try:
+            decrypted_data = fernet.decrypt(encrypted_data)
+        except Exception as e:
+            return {"success": False, "error": f"Decryption failed (wrong key?): {e}"}
         
+        # Calculate checksum of decrypted file
+        checksum = hashlib.sha256(decrypted_data).hexdigest()
+        
+        # Determine output path
+        if output_path is None:
+            # Remove .enc extension if present
+            if input_path.suffix == '.enc':
+                output_path = input_path.with_suffix('')
+            else:
+                output_path = Path(str(input_path) + '.decrypted')
+        else:
+            output_path = Path(output_path)
+        
+        # Write decrypted file
         with open(output_path, 'wb') as f:
             f.write(decrypted_data)
         
-        print(f"[DriveSend] Decrypted: {input_path.name} → {output_path.name}")
         return {
-            'success': True,
-            'input_path': str(input_path),
-            'output_path': str(output_path),
-            'encrypted_size': len(encrypted_data),
-            'decrypted_size': len(decrypted_data)
+            "success": True,
+            "decrypted_path": str(output_path),
+            "encrypted_path": str(input_path),
+            "checksum": checksum,
+            "decrypted_size": len(decrypted_data)
         }
-    
+        
     except Exception as e:
-        return {'success': False, 'error': f'Decryption failed: {e}'}
+        return {"success": False, "error": str(e)}

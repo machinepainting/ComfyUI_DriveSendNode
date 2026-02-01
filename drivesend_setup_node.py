@@ -81,7 +81,13 @@ class DriveSendSetupNode:
         encryption_key = None
         if encryption_key_method != "off":
             # Check for existing key
-            existing_key = os.environ.get('comfyui_encryption_key')
+            # Check for existing key (multiple possible names)
+            existing_key = (
+                os.environ.get('COMFYUI_ENCRYPTION_KEY') or
+                os.environ.get('comfyui_encryption_key') or
+                os.environ.get('DROPSEND_ENCRYPTION_KEY') or
+                os.environ.get('DRIVESEND_ENCRYPTION_KEY')
+            )
             if existing_key:
                 encryption_key = existing_key
                 results.append("Using existing encryption key from environment")
@@ -90,7 +96,7 @@ class DriveSendSetupNode:
                 encryption_key = Fernet.generate_key().decode('utf-8')
                 results.append("Generated new encryption key")
             
-            env_vars['comfyui_encryption_key'] = encryption_key
+            env_vars['COMFYUI_ENCRYPTION_KEY'] = encryption_key
         
         # === OAuth Setup ===
         if auth_method == 'oauth':
