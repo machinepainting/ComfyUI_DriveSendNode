@@ -4,6 +4,8 @@ Automatically upload your ComfyUI output files to Google Drive with optional enc
 
 > **Prefer Dropbox?** Check out [DropSend Node](https://github.com/machinepainting/ComfyUI_DropSendNode)
 
+![DriveSend Node Overview](Images/DriveSend_Node_Display.jpg)
+
 ---
 
 ## 🔄 How It Works
