@@ -376,18 +376,6 @@ Use the scripts in `/scripts/` folder after downloading encrypted files from Goo
 
 ---
 
-## 📊 Comparison: DriveSend vs DropSend
-
-| Feature | DriveSend (Google Drive) | DropSend (Dropbox) |
-|---------|-------------------------|-------------------|
-| Free with personal account | ✅ OAuth | ✅ Yes |
-| Service account support | ⚠️ Workspace only | N/A |
-| Storage (free tier) | 15 GB | 2 GB |
-| Token management | Auto-refresh | Auto-refresh |
-| Setup complexity | Medium | Easy |
-
----
-
 ## 🧪 Tested On
 
 - Python 3.10 / 3.11
