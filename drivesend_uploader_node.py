@@ -100,7 +100,8 @@ class DriveSendAutoUploaderNode:
                 os.environ.get('COMFYUI_ENCRYPTION_KEY') or
                 os.environ.get('comfyui_encryption_key') or
                 os.environ.get('DROPSEND_ENCRYPTION_KEY') or
-                os.environ.get('DRIVESEND_ENCRYPTION_KEY')
+                os.environ.get('DRIVESEND_ENCRYPTION_KEY') or
+                os.environ.get('RUNPOD_SECRET_COMFYUI_ENCRYPTION_KEY')
             )
             if not enc_key:
                 return (

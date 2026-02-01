@@ -12,13 +12,14 @@ from cryptography.fernet import Fernet
 def get_encryption_key():
     """
     Get the encryption key from environment variable.
-    Checks multiple possible key names for compatibility with DropSend.
+    Checks multiple possible key names for compatibility.
     
     Key retrieval order:
       - COMFYUI_ENCRYPTION_KEY (uppercase - preferred)
-      - comfyui_encryption_key (lowercase - DropSend compatibility)
+      - comfyui_encryption_key (lowercase - legacy)
       - DROPSEND_ENCRYPTION_KEY
       - DRIVESEND_ENCRYPTION_KEY
+      - RUNPOD_SECRET_COMFYUI_ENCRYPTION_KEY (RunPod fallback)
     
     Returns:
         str: The encryption key, or None if not set
@@ -27,7 +28,8 @@ def get_encryption_key():
         os.environ.get('COMFYUI_ENCRYPTION_KEY') or
         os.environ.get('comfyui_encryption_key') or
         os.environ.get('DROPSEND_ENCRYPTION_KEY') or
-        os.environ.get('DRIVESEND_ENCRYPTION_KEY')
+        os.environ.get('DRIVESEND_ENCRYPTION_KEY') or
+        os.environ.get('RUNPOD_SECRET_COMFYUI_ENCRYPTION_KEY')
     )
 
 

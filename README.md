@@ -10,7 +10,7 @@ A ComfyUI custom node for uploading output files to Google Drive with optional e
 | Method | Account Type | Cost | Best For |
 |--------|-------------|------|----------|
 | **OAuth 2.0** | Personal Gmail | Free | Most users |
-| **Service Account** | Google Workspace | Paid Tier | Business accounts |
+| **Service Account** | Google Workspace | ~$7+/month | Business accounts |
 
 **Most users should use OAuth 2.0** - it works with free personal Gmail accounts and tokens auto-refresh on each pod startup.
 
@@ -336,11 +336,6 @@ Add environment variable:
 | Key | Value |
 |-----|-------|
 | `COMFYUI_ENCRYPTION_KEY` | `{{ RUNPOD_SECRET_COMFYUI_ENCRYPTION_KEY }}` |
-
-> **Note:** DriveSend also checks for these fallback key names for compatibility with DropSend:
-> - `comfyui_encryption_key` (lowercase)
-> - `DROPSEND_ENCRYPTION_KEY`
-> - `DRIVESEND_ENCRYPTION_KEY`
 
 ### Decrypt Files Locally
 

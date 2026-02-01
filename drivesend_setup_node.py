@@ -81,12 +81,13 @@ class DriveSendSetupNode:
         encryption_key = None
         if encryption_key_method != "off":
             # Check for existing key
-            # Check for existing key (multiple possible names)
+            # Check for existing key (multiple possible names for compatibility)
             existing_key = (
                 os.environ.get('COMFYUI_ENCRYPTION_KEY') or
                 os.environ.get('comfyui_encryption_key') or
                 os.environ.get('DROPSEND_ENCRYPTION_KEY') or
-                os.environ.get('DRIVESEND_ENCRYPTION_KEY')
+                os.environ.get('DRIVESEND_ENCRYPTION_KEY') or
+                os.environ.get('RUNPOD_SECRET_COMFYUI_ENCRYPTION_KEY')
             )
             if existing_key:
                 encryption_key = existing_key
