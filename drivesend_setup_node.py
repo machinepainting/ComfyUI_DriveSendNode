@@ -138,7 +138,15 @@ class DriveSendSetupNode:
                 result = get_oauth_credentials_for_setup(client_id, client_secret, auth_code)
                 
                 if 'error' in result:
-                    return (f"❌ Error: {result['error']}\n\nTry generating a new auth code.",)
+                    return (
+                        f"❌ Error: {result['error']}\n\n"
+                        f"The auth code may have expired or already been used.\n"
+                        f"To fix:\n"
+                        f"1. Clear the 'auth_code' field (delete the code)\n"
+                        f"2. Run this node again to get a new URL\n"
+                        f"3. Click the URL and authorize again\n"
+                        f"4. Paste the new auth code",
+                    )
                 
                 if 'credentials' in result:
                     creds = result['credentials']
