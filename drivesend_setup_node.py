@@ -6,7 +6,6 @@ Handles Google Drive API authentication setup for both OAuth and Service Account
 import os
 import json
 import base64
-import webbrowser
 from pathlib import Path
 from cryptography.fernet import Fernet
 
@@ -113,30 +112,23 @@ class DriveSendSetupNode:
                 if 'auth_url' in result:
                     auth_url = result['auth_url']
                     
-                    # Try to open browser
-                    try:
-                        webbrowser.open(auth_url)
-                        browser_msg = "Browser opened!"
-                    except:
-                        browser_msg = "Could not open browser automatically."
-                    
                     print("\n" + "="*60)
                     print("[DriveSend Setup] OAuth Authorization Required")
                     print("="*60)
-                    print(f"\n{browser_msg}\n")
-                    print("If browser didn't open, visit this URL:")
-                    print(f"\n{auth_url}\n")
-                    print("After authorizing, copy the code and paste it in the")
-                    print("'auth_code' field, then run this node again.")
+                    print("\nClick the URL below to authorize DriveSend:\n")
+                    print(auth_url)
+                    print("\n" + "="*60)
+                    print("After authorizing, copy the authorization code and paste")
+                    print("it into the 'auth_code' field, then run this node again.")
                     print("="*60 + "\n")
                     
                     return (
                         f"🔐 OAuth Step 1: Authorization Required\n\n"
-                        f"{browser_msg}\n\n"
-                        f"1. Sign in to Google and authorize the app\n"
-                        f"2. Copy the authorization code\n"
-                        f"3. Paste it in the 'auth_code' field\n"
-                        f"4. Run this node again",
+                        f"1. Click the URL in the terminal/console\n"
+                        f"2. Sign in to Google and authorize DriveSend\n"
+                        f"3. Copy the authorization code shown\n"
+                        f"4. Paste it in the 'auth_code' field\n"
+                        f"5. Run this node again",
                     )
                 else:
                     return (f"❌ Error generating auth URL: {result.get('error', 'Unknown error')}",)
