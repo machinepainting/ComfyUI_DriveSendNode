@@ -250,7 +250,7 @@ The `/scripts/` folder contains scripts to decrypt `.enc` files on your local ma
 
 > ⚠️ **LOCAL USE ONLY** — Run these after downloading encrypted files from Google Drive.
 
-> **ONLY DECRYPT ONCE FILES HAVE BEEN MOVED TO YOUR LOCAL COMPUTER OR EXTERNAL HD. OTHERWISE IT DEFEATS THE PURPOSE OF ENCRYPTION BEFORE SENDING .enc TO CLOUD STORAGE.**
+> **ONLY DECRYPT ONCE FILES HAVE BEEN MOVED TO YOUR LOCAL COMPUTER OR EXTERNAL HD. OTHERWISE IT DEFEATS THE PURPOSE OF ENCRYPTION BEFORE SENDING TO CLOUD STORAGE.**
 
 ### Prerequisites on local machine for decrypting
 
@@ -284,14 +284,14 @@ Once your encrypted `.enc` files have been downloaded from the cloud, you can de
 
 1. **Go to the [`/scripts`](https://github.com/machinepainting/ComfyUI_DriveSendNode/tree/main/scripts) folder** in this repository.
 
-2. **Select the script for your platform:**
+2. **Select your platform folder** (`mac/`, `win/`, or `linux/`) and download the decrypt script for your OS. If you want to use the cross-platform Python version, grab `decrypt_folder.py` from the scripts root instead.
 
-   | Platform | Script |
-   |---|---|
-   | macOS | `decrypt_folder_mac.sh` |
-   | Windows | `decrypt_folder_win.py` |
-   | Linux | `decrypt_folder_linux.sh` |
-   | Cross-platform | `decrypt_folder.py` |
+   | Platform | Folder | Script |
+   |---|---|---|
+   | macOS | `mac/` | `decrypt_folder_mac.sh` |
+   | Windows | `win/` | `decrypt_folder_win.py` |
+   | Linux | `linux/` | `decrypt_folder_linux.sh` |
+   | Cross-platform | scripts root | `decrypt_folder.py` |
 
 3. **Download the script** and place it in a convenient location on your computer. Your user root/home directory is recommended for easy terminal access (e.g. `~/` on macOS/Linux or `C:\Users\YourName\` on Windows).
 
@@ -325,9 +325,9 @@ Once your encrypted `.enc` files have been downloaded from the cloud, you can de
 
 That's it — your decrypted files are now available locally on your machine, off the cloud and ready to use.
 
----
+> **💡 Manual Encryption:** Each platform folder also contains an encryption script if you ever want to encrypt files manually outside of ComfyUI — for example, encrypting media before uploading it yourself. These are separate from the node's built-in encryption, which handles everything automatically during upload.
 
-## 🛠️ Troubleshooting
+---
 
 ### "storageQuotaExceeded" Error
 - **Cause:** Using service account with personal Gmail
@@ -389,12 +389,15 @@ ComfyUI_DriveSendNode/
 ├── .gitignore
 └── scripts/
     ├── decrypt_folder.py
-    ├── decrypt_folder_mac.sh
-    ├── encrypt_folder_mac.sh
-    ├── decrypt_folder_win.py
-    ├── encrypt_folder_win.py
-    ├── decrypt_folder_linux.sh
-    └── encrypt_folder_linux.sh
+    ├── mac/
+    │   ├── decrypt_folder_mac.sh
+    │   └── encrypt_folder_mac.sh
+    ├── win/
+    │   ├── decrypt_folder_win.py
+    │   └── encrypt_folder_win.py
+    └── linux/
+        ├── decrypt_folder_linux.sh
+        └── encrypt_folder_linux.sh
 ```
 
 ---
