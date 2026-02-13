@@ -132,7 +132,7 @@ Restart ComfyUI after installation.
 
 ### Step 6: Run Setup Node
 
-1. Add **DriveSend Setup Node** to your workflow
+1. Add **DriveSend Setup Node** to your ComfyUI workflow
 2. Configure:
    - `auth_method`: **oauth**
    - `folder_id`: Paste your Folder ID
@@ -143,7 +143,7 @@ Restart ComfyUI after installation.
    - `encryption_key_method`: **Display Only** (or **off** if not using encryption)
 
 3. Run the node → Check the terminal for a URL
-4. **Click the URL** to open Google authorization
+4. **Copy and open the URL** to open Google authorization
 5. Sign in and **accept access** for DriveSend
 6. Click **Continue** when prompted → Copy the **authorization code**
 7. Paste code into `auth_code` field
@@ -167,12 +167,12 @@ COMFYUI_ENCRYPTION_KEY=your_key (if encryption enabled)
 ============================================================
 ```
 
-**Copy only the value after the `=` sign** (not the variable name).
+**Copy only the value after the `=` sign** (do not include the "VARIABLE_NAME=").
 
 ### Step 8: Create RunPod Secrets
 
 1. Go to [RunPod.io](https://www.runpod.io) → Click **Secrets** in sidebar
-2. Create these secrets:
+2. Create these secrets (Make sure the name of the secret is EXACTLY as shown below):
 
 | Secret Name | Secret Value |
 |-------------|--------------|
@@ -201,18 +201,25 @@ Creating a template saves your environment variables so you don't have to add th
 | `COMFYUI_ENCRYPTION_KEY` | `{{ RUNPOD_SECRET_COMFYUI_ENCRYPTION_KEY }}` *(optional)* |
 
 6. Click **Save Template**
-7. When deploying new pods, select your custom template!
+7. When deploying a new pod, click **Change Template** → select your custom template. Done!
 
-> **Tip:** If you already have a pod running, click **Edit Template** → add environment variables → **Set Overrides** → redeploy.
+> ⚠️ **Why this matters:** If you skip creating a custom template, you'll have to manually add all 5 environment variables every single time you start a new pod. Save yourself the headache — make the template once and reuse it.
+
+> **💡 New to templates?** Take a template you already use, copy its container/docker settings into a new custom template, add the environment variables above, and save. That's it.
+
+> **Already have a pod running?** Terminate it → deploy a new pod using your custom template. This is the cleanest way to pick up the new environment variables.
 
 ### Step 10: Test Upload
 
 1. Open ComfyUI on your RunPod
-2. Add **DriveSend AutoUploader** node
+2. Add **DriveSend AutoUploader** node to a workflow
 3. Set:
    - `auth_method`: **oauth**
    - `run_process`: **True**
    - `enable_encryption`: **True** or **False** (your choice)
+   - `Post_Delete_Enc`: **False**
+   - `Subfolder_Monitor`: **True**
+   - `Run_Process`: **True**
 4. Run a workflow that generates an image
 5. Check your Google Drive folder!
 
@@ -243,7 +250,9 @@ The `/scripts/` folder contains scripts to decrypt `.enc` files on your local ma
 
 > ⚠️ **LOCAL USE ONLY** — Run these after downloading encrypted files from Google Drive.
 
-### Prerequisites
+> **ONLY DECRYPT ONCE FILES HAVE BEEN MOVED TO YOUR LOCAL COMPUTER OR EXTERNAL HD. OTHERWISE IT DEFEATS THE PURPOSE OF ENCRYPTION BEFORE SENDING .enc TO CLOUD STORAGE.**
+
+### Prerequisites on local machine for decrypting
 
 ```bash
 pip install cryptography
@@ -267,21 +276,54 @@ source ~/.bashrc
 
 ### Run Decryption
 
-```bash
-cd ComfyUI/custom_nodes/ComfyUI_DriveSendNode/scripts
+### Local Decryption (Decrypt Files on Your Computer)
 
-# macOS
-./decrypt_folder_mac.sh
+Once your encrypted `.enc` files have been downloaded from the cloud, you can decrypt them locally using the platform-specific scripts provided in this repo.
 
-# Windows
-python decrypt_folder_win.py
+#### Step-by-Step
 
-# Linux
-./decrypt_folder_linux.sh
+1. **Go to the [`/scripts`](https://github.com/machinepainting/ComfyUI_DriveSendNode/tree/main/scripts) folder** in this repository.
 
-# Cross-platform
-python decrypt_folder.py
-```
+2. **Select the script for your platform:**
+
+   | Platform | Script |
+   |---|---|
+   | macOS | `decrypt_folder_mac.sh` |
+   | Windows | `decrypt_folder_win.py` |
+   | Linux | `decrypt_folder_linux.sh` |
+   | Cross-platform | `decrypt_folder.py` |
+
+3. **Download the script** and place it in a convenient location on your computer. Your user root/home directory is recommended for easy terminal access (e.g. `~/` on macOS/Linux or `C:\Users\YourName\` on Windows).
+
+4. **Open a terminal** and navigate to the folder where you saved the script:
+   ```bash
+   # macOS / Linux — example if saved to home directory
+   cd ~/
+
+   # Windows (Command Prompt) — example if saved to user folder
+   cd C:\Users\YourName\
+   ```
+
+5. **Run the decryption script:**
+   ```bash
+   # macOS
+   ./decrypt_folder_mac.sh
+
+   # Windows
+   python decrypt_folder_win.py
+
+   # Linux
+   ./decrypt_folder_linux.sh
+
+   # Cross-platform (Python)
+   python decrypt_folder.py
+   ```
+
+6. **When prompted, drag in (or paste the path to) the folder containing your `.enc` files.**
+
+7. **The script will decrypt your files.** Once complete, you'll be asked if you'd like to move the original `.enc` files to a separate folder for cleanup. Note: the script will **never delete your files** — you can remove the `.enc` originals manually at your own discretion.
+
+That's it — your decrypted files are now available locally on your machine, off the cloud and ready to use.
 
 ---
 
