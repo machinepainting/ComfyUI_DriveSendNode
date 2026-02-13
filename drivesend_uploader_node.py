@@ -44,7 +44,7 @@ class DriveSendAutoUploaderNode:
             "required": {
                 "watch_folder": ("STRING", {"default": default_watch}),
                 "auth_method": (["oauth", "service_account"], {"default": "oauth"}),
-                "enable_encryption": ("BOOLEAN", {"default": False}),
+                "enable_encryption": ("BOOLEAN", {"default": True}),
                 "Post_Delete_Enc": ("BOOLEAN", {"default": False}),
                 "Subfolder_Monitor": ("BOOLEAN", {"default": True}),
                 "run_process": ("BOOLEAN", {"default": True, "label": "Run Process"}),
