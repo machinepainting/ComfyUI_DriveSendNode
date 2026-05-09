@@ -106,8 +106,10 @@ def get_oauth_credentials():
             credentials = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
             if credentials and credentials.expired and credentials.refresh_token:
                 credentials.refresh(Request())
-                # Save refreshed token
-                with open(TOKEN_FILE, 'w') as token:
+                # Save refreshed token. Race-free 0o600 open so the file
+                # is not world-readable in the open->chmod window.
+                fd = os.open(str(TOKEN_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, 'w') as token:
                     token.write(credentials.to_json())
                 print("[DriveSend] OAuth credentials loaded and refreshed from token file")
             elif credentials and credentials.valid:
@@ -128,9 +130,10 @@ def get_oauth_credentials():
                 str(CLIENT_SECRET_FILE), SCOPES
             )
             credentials = flow.run_local_server(port=0)
-            
-            # Save the credentials for future use
-            with open(TOKEN_FILE, 'w') as token:
+
+            # Save the credentials for future use. Race-free 0o600 open.
+            fd = os.open(str(TOKEN_FILE), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as token:
                 token.write(credentials.to_json())
             
             print("[DriveSend] ✓ OAuth authorization complete")

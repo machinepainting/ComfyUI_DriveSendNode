@@ -10,14 +10,8 @@ from watchdog.events import FileSystemEventHandler
 from cryptography.fernet import Fernet
 import threading
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('drivesend.log'),
-        logging.StreamHandler()
-    ]
-)
+# logging is configured centrally in __init__.py via a FileHandler on
+# the root logger.
 logger = logging.getLogger(__name__)
 
 ENCRYPT_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.avi', '.mov')
@@ -75,9 +69,14 @@ class FileEncryptHandler(FileSystemEventHandler):
         self.start_queue_processor()
 
     def on_created(self, event):
-        if not event.is_directory and event.src_path.lower().endswith(ENCRYPT_EXTENSIONS):
-            logger.info(f"[DriveSend] Detected new file to encrypt: {event.src_path}")
-            self.file_queue.put(event.src_path)
+        if event.is_directory or not event.src_path.lower().endswith(ENCRYPT_EXTENSIONS):
+            return
+        from .safe_paths import is_safe_event_path
+        if not is_safe_event_path(event.src_path):
+            logger.warning(f"[DriveSend] Skipping unsafe path (symlink or outside output root): {event.src_path}")
+            return
+        logger.info(f"[DriveSend] Detected new file to encrypt: {event.src_path}")
+        self.file_queue.put(event.src_path)
 
     def start_queue_processor(self):
         def process_queue():
@@ -119,16 +118,3 @@ class FileEncryptHandler(FileSystemEventHandler):
         threading.Thread(target=process_queue, daemon=True).start()
 
 
-if __name__ == "__main__":
-    watch_dir = os.getenv("WATCH_DIR", "/workspace/ComfyUI/output")
-    os.makedirs(watch_dir, exist_ok=True)
-    observer = Observer()
-    observer.schedule(FileEncryptHandler(watch_dir), path=watch_dir, recursive=True)
-    observer.start()
-    logger.info(f"[DriveSend] Monitoring {watch_dir} for new files to encrypt...")
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        observer.stop()
-    observer.join()

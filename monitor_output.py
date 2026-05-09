@@ -11,14 +11,9 @@ from watchdog.events import FileSystemEventHandler
 from .gdrive_upload import upload_file
 from .encrypt_file import ENCRYPT_EXTENSIONS
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('drivesend.log'),
-        logging.StreamHandler()
-    ]
-)
+# logging is configured centrally in __init__.py via a FileHandler on
+# the root logger. logging.getLogger here returns a child logger that
+# propagates records into that handler.
 logger = logging.getLogger(__name__)
 
 watcher_observer = None
@@ -85,12 +80,17 @@ class NewFileHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         file_path = event.src_path
-        
+
+        from .safe_paths import is_safe_event_path
+        if not is_safe_event_path(file_path):
+            logger.warning(f"[DriveSend] Skipping unsafe path (symlink or outside output root): {file_path}")
+            return
+
         # When encryption is enabled, only process .enc files
         if encryption_enabled and not file_path.lower().endswith('.enc'):
             logger.debug(f"[DriveSend] Skipping non-.enc file (encryption enabled): {file_path}")
             return
-        
+
         # When encryption is disabled, skip .enc files and only process supported extensions
         if not encryption_enabled:
             if file_path.lower().endswith('.enc'):
@@ -99,7 +99,7 @@ class NewFileHandler(FileSystemEventHandler):
             if not file_path.lower().endswith(ENCRYPT_EXTENSIONS):
                 logger.debug(f"[DriveSend] Skipping unsupported file type: {file_path}")
                 return
-        
+
         logger.info(f"[DriveSend] Detected new file: {file_path}")
         self.file_queue.put(file_path)
 

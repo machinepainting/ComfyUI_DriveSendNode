@@ -17,6 +17,11 @@ env/
 .env
 .env.*
 
+# Google Drive credential files (refresh token, client secret, service account key)
+token.json
+client_secret.json
+service_account.json
+
 # MacOS system files
 .DS_Store
 
@@ -33,3 +38,39 @@ node_modules/
 output/
 temp/
 logs/
+
+# Editor/IDE backups (may capture secrets from edited files like .env)
+*.bak
+*.backup
+*~
+*.swp
+*.swo
+.idea/
+
+# Encrypted artifacts from local test runs
+*.enc
+
+# Stray credential material
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Claude Code session data
+.claude/
+
+# Python test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python build artifacts
+*.egg-info/
+build/
+dist/
+pip-log.txt
+pip-wheel-metadata/
+
+# Windows OS files
+Thumbs.db
+Desktop.ini
